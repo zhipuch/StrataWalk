@@ -25,7 +25,7 @@ def node(d,x,y,label,active=False,width=156):
 # Static hero: one compact brand surface, with readable text and a miniature tree.
 im,d=base(); text(d,(65,58),'STRATAWALK',19,TEAL,True)
 text(d,(65,132),'Long documents.',62,INK,True); text(d,(65,207),'Navigable memory.',62,INK,True)
-text(d,(68,309),'Give agents the big picture',27,MUTED); text(d,(68,349),'and a path back to the evidence.',27,MUTED)
+text(d,(68,309),'Build a bottom-up tree index.',27,MUTED); text(d,(68,349),'Let agents search and walk it.',27,MUTED)
 pill(d,(65,449,276,488),'BUILD BOTTOM-UP'); pill(d,(290,449,505,488),'EXPLORE ANY SCALE',BLUE)
 positions=[(925,175),(815,310),(1035,310),(760,445),(870,445),(980,445),(1090,445)]
 for a,b in [(0,1),(0,2),(1,3),(1,4),(2,5),(2,6)]: d.line((*positions[a],*positions[b]),fill=LINE,width=3)
@@ -35,48 +35,74 @@ for a,b in [(0,1),(1,4)]: d.line((*positions[a],*positions[b]),fill=TEAL,width=3
 text(d,(65,622),'ORDERED SUMMARY TREES  /  MULTI-SCALE SEARCH  /  AGENTIC NAVIGATION',18,MUTED)
 text(d,(65,666),'DESIGN PREVIEW',14,TEAL,True)
 im.save(OUT/'hero.png')
-# Animated mechanism: synthetic report, actual links, no fabricated runtime results.
-steps=[
- ('01 / BUILD','Start with source passages.','Overlapping chunks retain document order and source references.',[3,4,5,6],None),
- ('02 / ABSTRACT','Build memory from the bottom up.','Summarize adjacent groups; independent groups can run concurrently.',[1,2],None),
- ('03 / ORIENT','Keep the whole document in view.','A compact overview connects back to chapters and source passages.',[0],None),
- ('04 / SEARCH','Enter at a useful reading scale.','Semantic search finds a relevant chapter summary.',[2],(2,2)),
- ('05 / MOVE UP','Recover the broader context.','Read the document overview before interpreting the result.',[2,0],(2,0)),
- ('06 / MOVE DOWN','Follow the evidence across branches.','Inspect methods and results, then load their original passages.',[0,1,2,4,5],(0,5)),
- ('07 / FINISH','Answer from source evidence.','In this fixture, the quality gain is paired with higher memory use.',[4,5],None),
-]
-pos=[(440,260),(250,375),(630,375),(165,495),(335,495),(545,495),(715,495)]
-labels=['Document overview','Methods','Results','Setup [s1]','Memory [s2]','Quality [s3]','Limits [s4]']
-edges=[(0,1),(0,2),(1,3),(1,4),(2,5),(2,6)]
+
+# The index is a persistent structure. Tool actions live in a separate panel.
+# Node IDs are illustrative, blocks are inside nodes, and edges are node links.
+pos={ 'R':(420,242), 'C1':(230,378), 'C2':(610,378),
+      'L1':(135,514), 'L2':(325,514), 'L3':(515,514), 'L4':(705,514)}
+edges=[('R','C1'),('R','C2'),('C1','L1'),('C1','L2'),('C2','L3'),('C2','L4')]
+def box(d,key,on=False):
+ x,y=pos[key]; w=170 if key.startswith('L') else 190
+ d.rounded_rectangle((x-w/2,y-38,x+w/2,y+38),radius=9,fill='#143b3c' if on else PANEL,outline=TEAL if on else LINE,width=2)
+ title={'R':'Root node R','C1':'Chapter node C1','C2':'Chapter node C2'}.get(key,'Leaf node '+key)
+ text(d,(x-w/2+12,y-28),title,16,TEAL if on else INK,True)
+ if key.startswith('L'):
+  text(d,(x-w/2+12,y+2),'Source chunk + emb.',14,MUTED)
+ else:
+  for j in range(3):
+   left=x-w/2+12+j*55
+   d.rounded_rectangle((left,y+1,left+48,y+24),radius=4,fill='#20354d',outline=BLUE)
+   text(d,(left+7,y+4),'b'+str(j+1),12,INK)
+def canvas(title,sub):
+ im,d=base(); text(d,(38,27),'STRATAWALK / TREE INDEX + AGENT NAVIGATION',16,TEAL,True)
+ text(d,(38,76),title,31,INK,True); text(d,(40,119),sub,18,MUTED)
+ text(d,(40,164),'PERSISTENT INDEX',14,BLUE,True)
+ return im,d
+def panel(d,title,lines):
+ d.rounded_rectangle((834,165,1164,568),radius=14,fill=PANEL,outline=LINE)
+ text(d,(852,186),title,16,TEAL,True)
+ for i,line in enumerate(lines): text(d,(852,231+i*31),line,17,INK if i==0 else MUTED,i==0)
+def footer(d,n,total,label):
+ text(d,(40,599),label,16,TEAL,True)
+ step=1120/total
+ for j in range(total): d.rounded_rectangle((40+j*step,635,40+(j+1)*step-12,640),radius=2,fill=TEAL if j<=n else LINE)
+ text(d,(40,674),'Schematic only. Node IDs, block counts and paths are illustrative; no live execution is claimed.',15,MUTED)
+def drawtree(d,visible,active):
+ for a,b in edges:
+  if a in visible and b in visible:
+   x,y=pos[a]; xx,yy=pos[b]; d.line((x,y+38,xx,yy-38),fill=TEAL if a in active and b in active else LINE,width=3)
+ for key in visible: box(d,key,key in active)
+# Index construction animation: no agent/tool steps inside the tree.
+build=[
+ ('01 / CHUNK','Create ordered source leaves.','Parse d chapters; split each into overlapping, embedding-bounded chunks.', ['L1','L2','L3','L4'],['L1','L2','L3','L4'],['SOURCE ORDER','Chapter 1: L1, L2, ...','Chapter 2: L3, L4, ...','','Each leaf stores a chunk','and its embedding.']),
+ ('02 / REDUCE','Summarize groups within each chapter.','An LLM reduces n input blocks into a node containing k summary blocks.',list(pos)[1:],['C1','C2'],['BOTTOM-UP REDUCTION','[chunk blocks] -> node','node = [b1, b2, ..., bk]','','Each block gets an embedding.','Long chapters may need','multiple local reduction rounds.']),
+ ('03 / REPEAT','Reduce chapter representations upward.','Preserve source order and node links; repeat until a root budget is reached.',list(pos),['R'],['RECURSIVE ABSTRACTION','chapter nodes -> upper nodes','upper nodes -> root R','','Root contains h blocks.','Intermediate levels omitted','in this compact illustration.']),
+ ('04 / STORE','Persist structure and multi-scale embeddings.','The finished index supports both semantic entry and structural navigation.',list(pos),list(pos),['INDEX READY','Parent-child links: nodes','Embeddings: source chunks','and all summary/topic blocks','','Same-level groups can run','concurrently when independent.'])]
+bframes=[]
+for i,(tag,title,sub,visible,active,lines) in enumerate(build):
+ im,d=canvas(title,sub); drawtree(d,visible,active); panel(d,'INDEX CONSTRUCTION',lines); footer(d,i,len(build),tag)
+ bframes.append(im)
+bframes[0].save(OUT/'index-build.gif',save_all=True,append_images=bframes[1:],duration=2600,loop=0)
+bframes[-1].save(OUT/'index-structure.png')
+walk=[
+ ('01 / PLAN','Understand the question and select entry nodes.','The agent uses a compact chapter/ancestor map, embedding search, or both.',[],None,['AGENT WORKSPACE','User intent -> subquestions','Map and/or embedding search','Select m entry nodes','','Example entries: C1 and C2','The index stays unchanged.']),
+ ('02 / READ','Read several starting nodes.','A semantic hit identifies a block and its containing node.',['C1','C2'],None,['READ ENTRY NODES','C1 contains [b1, b2, b3]','C2 contains [b1, b2, b3]','','Check whether information','is sufficient to answer.']),
+ ('03 / UP','Move up when the information is too specific.','Follow parent links to read a broader abstraction.',['C1','R'],('C1','R'),['TOOL: move_up','C1 -> R','','Read the root blocks for','broader document context.','This is one optional move.']),
+ ('04 / DOWN','Move down when more detail is needed.','Explore independent branches via their parent-child links.',['C1','C2','L2','L3'],('C1','L2'),['TOOL: move_down','C1 -> L2','C2 -> L3','','Branches may be explored','concurrently. Original chunks','provide detailed information.']),
+ ('05 / COMPACT','Keep the active context within budget.','Compress the workspace while retaining findings and source references.',['L2','L3'],None,['TOOL: compact_context','Keep useful findings','Keep source/node references','Keep unresolved subquestions','','Re-enter search or navigation','when more information is needed.']),
+ ('06 / FINISH','Answer when the information is sufficient.','The agent assembles an answer from the information it has gathered.',['L2','L3'],None,['TOOL: finish','User-facing answer','Relevant source references','','Navigation is adaptive.','Every query does not need','every tool shown here.'])]
 frames=[]
-for si,(tag,title,sub,active,travel) in enumerate(steps):
+for si,(tag,title,sub,active,travel,lines) in enumerate(walk):
  for fi in range(12):
-  im,d=base(); text(d,(42,30),'STRATAWALK / HOW THE WALK WORKS',17,TEAL,True)
-  pill(d,(980,25,1158,63),'CONCEPT ANIMATION',MUTED)
-  text(d,(42,89),title,34,INK,True); text(d,(44,139),sub,20,MUTED)
-  for a,b in edges: d.line((*pos[a],*pos[b]),fill=TEAL if a in active and b in active else LINE,width=3)
-  if travel and travel[0]!=travel[1]:
-   a,b=travel; t=fi/11; x=pos[a][0]+(pos[b][0]-pos[a][0])*t; y=pos[a][1]+(pos[b][1]-pos[a][1])*t
-   d.ellipse((x-7,y-7,x+7,y+7),fill='#ffffff')
-  for i,(x,y) in enumerate(pos): node(d,x,y,labels[i],i in active,178 if i==0 else 156)
-  d.rounded_rectangle((835,205,1158,555),radius=16,fill=PANEL,outline=LINE)
-  text(d,(855,227),'SYNTHETIC REPORT',15,BLUE,True)
-  text(d,(855,269),'Question',16,MUTED,True)
-  text(d,(855,298),'What improved quality,',20,INK,True); text(d,(855,326),'and at what trade-off?',20,INK,True)
-  if si<6:
-   text(d,(855,388),'Source fixture',16,TEAL,True)
-   text(d,(855,421),'[s2] Extra memory required.',18)
-   text(d,(855,452),'[s3] Reranking improved',18); text(d,(894,479),'answer quality.',18)
-  else:
-   text(d,(855,388),'Evidence-grounded answer',16,TEAL,True)
-   text(d,(855,423),'Reranking improved quality',17)
-   text(d,(855,451),'[s3], with higher memory',17)
-   text(d,(855,479),'requirements [s2].',17)
-  text(d,(44,588),tag,18,TEAL,True)
-  for k in range(7):
-   x=44+k*160; d.rounded_rectangle((x,630,x+143,635),radius=2,fill=TEAL if k<=si else LINE)
-  text(d,(44,671),'Illustrative mechanism using a synthetic document. Not a live agent recording or benchmark.',16,MUTED)
-  frames.append(im)
-frames[0].save(OUT/'agent-walk.gif',save_all=True,append_images=frames[1:],duration=160,loop=0,optimize=True)
-frames[58].save(OUT/'agent-walk-poster.png')
-print('Generated hero.png, agent-walk.gif, agent-walk-poster.png')
+  im,d=canvas(title,sub); drawtree(d,list(pos),active); panel(d,'AGENT ACTION / STATE',lines)
+  if travel:
+   a,b=travel; x,y=pos[a]; xx,yy=pos[b]; t=fi/11
+   # Travel on the actual edge between card boundaries, never root-to-leaf jumps.
+   direction=1 if yy>y else -1
+   sy=y+direction*38; ey=yy-direction*38
+   px=x+(xx-x)*t; py=sy+(ey-sy)*t
+   d.ellipse((px-6,py-6,px+6,py+6),fill='#ffffff')
+  footer(d,si,len(walk),tag); frames.append(im)
+frames[0].save(OUT/'agent-walk.gif',save_all=True,append_images=frames[1:],duration=200,loop=0,optimize=True)
+frames[42].save(OUT/'agent-walk-poster.png')
+print('Generated hero, index construction, index structure, and navigation visuals.')

@@ -21,19 +21,35 @@ The whole document reveals **how the argument fits together**.
 It builds an ordered hierarchy from source passages to a document overview,
 then lets an agent search, explore, and return to the original evidence.
 
+## Build the Index
+
+<img src="assets/index-build.gif" alt="Bottom-up indexing: overlapping chunks become leaves; LLM reduction creates chapter nodes containing multiple summary blocks; repeated reduction produces a root with h blocks. All source and summary blocks are embedded." width="100%">
+
+**The tree is the index.** `R`, `C1`, `C2`, and `L1`–`L4` are illustrative
+node IDs, not execution steps. Each upper node contains several logical blocks
+(summary paragraphs or topics), each with an embedding. Leaf nodes retain
+source chunks and their embeddings. Parent–child edges describe the index structure.
+
+The compact drawing shows two chapters and omits intermediate reduction levels.
+Actual chapter count, tree depth, and block counts depend on the document and
+model budgets. Overlapping chunks and adjacent groups preserve source order.
+
 ## Watch the Walk
 
-<img src="assets/agent-walk.gif" alt="Concept animation: source chunks form a summary tree; an agent searches a chapter, moves up for context, then descends into memory and quality evidence to answer with source references." width="100%">
+<img src="assets/agent-walk.gif" alt="Agent navigation on a fixed tree index: select multiple entry nodes using a document map or embedding search, read their blocks, follow parent and child links, compact the workspace, and finish." width="100%">
 
-<sub>Looping mechanism illustration with a synthetic report. This is not a live execution recording or a benchmark result.</sub>
+**The right-hand panel shows Agent actions; the left-hand tree remains the index.**
+The agent understands or decomposes the question, selects m entry nodes using
+the chapter/ancestor map or embedding search, and evaluates whether it has
+enough information. It can move upward for abstraction, downward for detail,
+or search again. Independent branches can be explored concurrently.
 
-**Example question:** “What improved quality, and at what trade-off?”
+The animation illustrates possible actions, not a mandatory sequence.
+Compaction manages the active context without rebuilding the tree.
 
-The illustration follows a search into the results chapter, a move upward to
-recover context, and a descent into two evidence branches. In this synthetic
-fixture, reranking improves answer quality while requiring more memory.
+<sub>Both animations illustrate the proposed mechanism. They are not live execution recordings or benchmark results.</sub>
 
-[View the still image](assets/agent-walk-poster.png) · [Inspect or regenerate the animation](scripts/render_visuals.py)
+[View the index structure](assets/index-structure.png) · [View the navigation still](assets/agent-walk-poster.png) · [Regenerate the visuals](scripts/render_visuals.py)
 
 ## How It Works
 
@@ -44,15 +60,18 @@ fixture, reranking improves answer quality while requiring more memory.
 ### One document. Multiple reading scales.
 
 ```text
-Document overview                  ← global orientation
-├── Chapter summary                ← arguments and themes
-│   ├── Local summary              ← focused context
-│   │   ├── Source passage         ← original evidence
-│   │   └── Source passage
+Root node R: [block 1, ..., block h]
+├── Chapter node C1: [summary block 1, ..., block k]
+│   ├── Leaf L1: source chunk + embedding
+│   ├── Leaf L2: source chunk + embedding
 │   └── ...
-└── Chapter summary
-    └── ...
+├── Chapter node C2: [summary block 1, ..., block k]
+│   └── ...
+└── ...
 ```
+
+*Intermediate levels are omitted. All summary blocks also have embeddings;
+block counts can vary between nodes.*
 
 **Build upward.** LlamaIndex-based processing establishes source sections.
 Token-bounded passages become leaves. Adjacent groups are summarized into
