@@ -38,6 +38,10 @@ def parser():
             sub.add_argument("--max-steps", type=int, default=24)
             sub.add_argument("--context-limit", type=int, default=24000)
             sub.add_argument("--output-reserve", type=int, default=2048)
+            sub.add_argument("--directory-mode", choices=["full", "budgeted"], default="full")
+            sub.add_argument("--map-budget", type=int, default=0)
+            sub.add_argument("--parallel-actions", type=int, default=4)
+            sub.add_argument("--tool-response-budget", type=int, default=4096)
             sub.add_argument("--trace", type=Path, help="Write tool trace (contains document excerpts)")
             sub.add_argument("--json", action="store_true", help="Print answer, citations and status as JSON")
     for sub in (build, commands.choices["search"], commands.choices["ask"]):
@@ -93,10 +97,11 @@ async def run(args):
             hits = await search.search(args.question, args.top_k, args.kind)
             print(json.dumps([asdict(hit) for hit in hits], ensure_ascii=False, indent=2))
         else:
-            tools = TreeTools(index, search, tokenizer=tokenizer)
+            tools = TreeTools(index, search, tokenizer=tokenizer, response_budget=args.tool_response_budget)
             result = await Agent(tools, policy, tokenizer=tokenizer, config=AgentConfig(
                 max_steps=args.max_steps, context_limit=args.context_limit,
-                output_reserve=args.output_reserve)).run(args.question)
+                output_reserve=args.output_reserve, directory_mode=args.directory_mode,
+                map_budget=args.map_budget, max_parallel_actions=args.parallel_actions)).run(args.question)
             if args.trace:
                 args.trace.parent.mkdir(parents=True, exist_ok=True)
                 args.trace.write_text(json.dumps(result.trace, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -107,8 +112,9 @@ async def run(args):
                 print(result.answer)
                 print("\nStatus: " + result.status)
                 for citation in result.citations:
-                    print("[%s] %s characters %d:%d" % (
-                        citation["block_id"], citation["source_name"], citation["start"], citation["end"]))
+                    label = "source" if citation["evidence_type"] == "source" else "summary covering"
+                    print("[%s] %s %s characters %d:%d" % (
+                        citation["block_id"], citation["source_name"], label, citation["start"], citation["end"]))
             return 0 if result.status == "complete" else 2
     return 0
 

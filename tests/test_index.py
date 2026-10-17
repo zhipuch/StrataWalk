@@ -54,6 +54,25 @@ class IndexTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             corrupt.validate()
 
+    async def test_bidirectional_links_checksum_and_vector_integrity(self):
+        leaf_id = next(n.id for n in self.index.nodes.values() if n.kind == "leaf")
+        corrupt = deepcopy(self.index)
+        corrupt.nodes[leaf_id].parent = None
+        with self.assertRaisesRegex(ValueError, "parent link"):
+            corrupt.validate()
+        corrupt = deepcopy(self.index)
+        corrupt.source_text += "changed"
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            corrupt.validate()
+        corrupt = deepcopy(self.index)
+        corrupt.nodes[leaf_id].blocks[0].embedding[0] = float("nan")
+        with self.assertRaisesRegex(ValueError, "nonfinite"):
+            corrupt.validate()
+        corrupt = deepcopy(self.index)
+        corrupt.nodes[corrupt.root_id].children[0] = "missing"
+        with self.assertRaisesRegex(ValueError, "Missing child"):
+            corrupt.validate()
+
     async def test_multiscale_search_and_provider_mismatch(self):
         search = SemanticSearch(self.index, HashEmbedder())
         hits = await search.search("beta oranges memory", 5, "leaf")

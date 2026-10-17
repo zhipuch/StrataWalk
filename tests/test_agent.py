@@ -1,7 +1,7 @@
 import json
 import unittest
 from stratawalk.agent import Agent, AgentConfig, TreeTools
-from stratawalk.agent.prompts import SYSTEM
+from stratawalk.agent.prompts import SYSTEM, policy_messages
 from stratawalk.index.search import SemanticSearch
 from stratawalk.providers.offline import HashEmbedder, OfflinePolicy
 from stratawalk.tokenization import ByteTokenizer
@@ -69,7 +69,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         config = AgentConfig(context_limit=12000)
         await Agent(self.tools, policy, config=config).run("question")
         for state in policy.states:
-            messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": json.dumps(state, ensure_ascii=False)}]
+            messages = policy_messages(state)
             self.assertLessEqual(ByteTokenizer().count(json.dumps(messages, ensure_ascii=False)) + 32,
                                  config.context_limit - config.output_reserve - config.safety_margin)
 

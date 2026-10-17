@@ -36,7 +36,8 @@ source references. Its extractive summaries, hashed lexical vectors, and
 scripted policy are development fixtures—not quality benchmarks.
 
 **Use a real LLM:** [Model setup and CLI commands](docs/usage.md) ·
-**Explore the implementation:** [Code map and extension points](docs/development.md)
+**Explore the implementation:** [Code map and extension points](docs/development.md) ·
+[Algorithm and engineering review](docs/implementation-review.md)
 
 ## Build the Index
 
@@ -63,6 +64,8 @@ or search again. Independent branches can be explored concurrently.
 
 The animation illustrates possible actions, not a mandatory sequence.
 Compaction manages the active context without rebuilding the tree.
+The system prompt contains the full chapter-to-root directory by default;
+independent branches share a per-question visited set to avoid duplicate reads.
 
 <sub>Both animations illustrate the proposed mechanism. They are not live execution recordings or benchmark results.</sub>
 
@@ -122,7 +125,7 @@ source references, and unresolved questions.
 - **Connect perspective to proof.** Summary blocks retain links to supporting children.
 - **Let the question guide the walk.** Begin at the overview, a chapter, or a source passage.
 - **Build through concurrent work.** Independent groups can be summarized in parallel;
-  parents are scheduled after their children become ready.
+  each parent starts as soon as its own children are ready, without a whole-level barrier.
 
 Summaries guide exploration. Specific facts, figures, and quotations should
 be verified against source text. Indexing speed, retrieval quality, and cost

@@ -92,3 +92,11 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         result = await Agent(TreeTools(index, SemanticSearch(index, embedder)), ChatPolicy(model)).run("beta memory")
         self.assertEqual(result.status, "complete")
         self.assertEqual([t["tool"] for t in result.trace], ["move_down", "search", "finish"])
+
+    async def test_malformed_chat_and_nonfinite_embeddings_fail_clearly(self):
+        for response in ({"choices": []}, {"choices": [{"message": None}]},
+                         {"choices": [{"finish_reason": "length", "message": {"content": "partial"}}]}):
+            with self.assertRaises(ValueError):
+                await CompatibleChat(FakeClient(response), "fixture").complete([], max_tokens=100)
+        with self.assertRaises(ValueError):
+            await CompatibleEmbedder(FakeClient({"data": [{"index": 0, "embedding": [float("nan")]}]}), "fixture").embed(["text"])

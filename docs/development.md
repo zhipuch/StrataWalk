@@ -40,8 +40,10 @@ necessarily a globally balanced depth.
 `source_block_ids` records immediate child blocks supplied to a summary call.
 The first implementation conservatively records the whole input group for each
 output paragraph. This is input provenance, **not precise claim-level attribution**.
-Agent citations instead refer to source leaf blocks that were actually returned
-by tools, with original character offsets and the exact delivered excerpt.
+Precise-answer citations refer to source leaves actually returned by tools,
+with original character offsets. Overview answers may instead cite directory
+or read summary blocks using explicit `answer_scope="overview"`; result records
+label these as `evidence_type="summary"`, not original source quotations.
 
 All source positions are zero-based Python character offsets, with an exclusive
 end. They are not bytes, PDF page numbers, or token positions.
@@ -54,19 +56,35 @@ explicit even for a single-section document.
 
 ## Construction and budgets
 
-`BuildConfig` controls source chunk size/overlap, embedding input limit,
-reduction input, summary output size, total summarizer context, group fanout,
-request concurrency, and embedding batch size.
+`BuildConfig` separates the input and output constraints:
 
-Two source chunks or two summaries must fit the reduction input. Ordered greedy
-groups therefore reduce the number of frontier nodes on every nontrivial round.
-Summary outputs are validated against their budget; an overlong result fails
-explicitly rather than silently discarding information. The full serialized LLM
-request is checked with output space and a safety reserve before dispatch.
+- `max_children` caps structural fan-in; `reduction_input` caps combined input text.
+- `summary_size` caps total output text; `max_topics` caps topic count.
+- `topic_size` caps each topic and is limited by `embedding_limit`.
+- Effective total output cap is `min(summary_size, max_topics * effective_topic_size)`.
+- `context_limit` includes the complete serialized prompt, input block IDs/text,
+  completion JSON reserve, corrective-feedback reserve and a safety margin.
 
-Independent chapter/group requests share one concurrency semaphore. Parent
-summaries wait for children. Embeddings for all blocks are batched after tree
-construction. No partial index file is published on a failed build.
+The `ordered-topics-v2` prompt asks for core themes and claims, coherent standalone
+topics, overlap deduplication, source language/order, and preservation of material
+qualifications, negations and disagreements. LLM output is validated and can be
+regenerated with bounded corrective feedback (`summary_retries`, default 2).
+Malformed or overlong output is never silently truncated into a valid summary.
+This enforces structure and budgets; semantic fidelity still needs real-model evaluation.
+
+Construction is a dependency DAG, not a loop with whole-level barriers.
+Contiguous groups are planned using source order and reserved output caps.
+Every parent waits only for its own children, acquiring a shared request semaphore
+**after** those children are ready. Other groups on that level need not finish.
+The same applies across chapter boundaries: upper groups may start while unrelated
+chapters are still reducing. Completion order never changes group membership.
+
+Actual serialized requests are checked before dispatch. If a planned group is too
+large after JSON/prompt overhead, contiguous halves reduce first. If even a pair
+cannot fit, construction fails with a configuration error. Two reserved outputs
+must fit the text budget so frontier node counts converge. On failure/cancellation,
+pending sibling tasks are cancelled and awaited. Embedding batches run after the
+completed tree; embedding is not currently pipelined with summarization.
 
 Default units are UTF-8 bytes, a conservative approximation for byte-level
 model tokenizers, **not a universal tokenizer guarantee**. Supply the actual
@@ -77,30 +95,41 @@ against both in a custom builder. The CLI currently uses one counter for both.
 
 ## Agent behavior
 
-`ChatPolicy` asks a model for a JSON tool action on each turn. This intentionally
-small provider contract does not require vendor-specific native function calling.
-The runtime dispatches five tools, validates input/citations, records results,
-limits steps, and rejects repeatedly identical actions.
+`ChatPolicy` asks a model for JSON tool actions on each turn. It supports either
+one action or a batch of independent `search`/`move_up`/`move_down` actions.
+This is one coordinating agent with concurrent tool branches, not separate LLM
+agents per starting node. `finish` and `compact_context` execute alone.
 
-The document map includes a budgeted root overview, chapter descriptors and
-summaries, and deduplicated ancestor summaries. Large maps are partial; the
-agent can use the root's paginated children or search to reach omitted chapters.
+The default system message contains the **full deduplicated chapter-to-root
+directory**, including all topic text in those nodes. It is not repeated in the
+user message. `policy_messages()` is shared by inference and context accounting.
+Full mode fails before a policy request if the directory cannot fit; an explicit
+`directory_mode="budgeted"` and positive `map_budget` enables partial coverage.
+No empirical directory-size claim is made: chapter count and topic lengths matter.
 
-The persistent evidence ledger lives outside the LLM context. Each request
-renders a bounded selection of evidence and recent observations. The explicit
-compaction tool updates working notes and drops old observations while retaining
-source references. Notes are model-generated hypotheses; they are not verified
-facts. Context accounting includes serialized messages and output reserves.
+A search result selects up to `top_k` **distinct nodes**, not `top_k` blocks from
+possibly one node. Multiple subqueries embed concurrently. A per-query session
+shares visited state and a cache across all branches. Nodes in the system directory
+are already read. Repeated node reads return `already_visited` references instead
+of re-emitting text; known parents can still be expanded toward unread children.
+Omitted nodes remain unvisited. A new question always creates a fresh session.
 
-Navigation is a batched in-memory read, so independent node requests do not
-require expensive model calls of their own. The policy chooses subsequent moves.
+Tool results return whole nodes within an actual serialized budget, including
+rankings and page metadata. A single node that cannot fit raises an actionable
+error; reducing batching alone cannot solve an oversized individual node.
+Pagination changes child ranges, not whether an already read child is reread.
+Context compaction rehydrates cached nodes without retraversing the index.
+
+The source-evidence ledger persists outside the active prompt. Each request
+renders a bounded selection of recent observations and evidence. Notes are
+working hypotheses. A node is not committed as visited if its result cannot
+reach the next policy request. Citation validation checks known block IDs,
+source offsets and answer scope; it cannot prove textual entailment.
+
 The offline policy deliberately performs only search → finish and reports exact
-excerpts; it is not a demonstration of autonomous LLM reasoning. Tests use a
-scripted policy to exercise both directions and context compaction.
-
-Citation validation proves that cited excerpts were retrieved and have valid
-source offsets. It cannot prove that the answer is entailed by those excerpts.
-That requires evaluation or an additional verification stage.
+excerpts. It is not evidence of autonomous reasoning quality. Scripted/model-adapter
+fixtures exercise navigation, parallel branches, directory-only overview answers,
+compaction, and shared visit deduplication.
 
 ## Extension points
 

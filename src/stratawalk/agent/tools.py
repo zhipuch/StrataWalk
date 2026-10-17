@@ -1,15 +1,24 @@
-"""Read-only tree tools with bounded serialization and exact source provenance."""
+"""Tree reads and per-query navigation sessions, distinct from persistent storage."""
+import asyncio
+from dataclasses import dataclass, field
 import json
-from ..tokenization import ByteTokenizer, prefix
+from ..tokenization import ByteTokenizer
+
+
+@dataclass
+class TraversalState:
+    visited: set = field(default_factory=set)
+    cache: dict = field(default_factory=dict)
+    order: list = field(default_factory=list)
 
 
 class TreeTools:
-    def __init__(self, index, search, *, tokenizer=None, response_budget=4096):
+    def __init__(self, index, search, *, tokenizer=None, response_budget=4096, session=None):
         self.index, self.search_engine = index, search
         self.tokenizer = tokenizer or ByteTokenizer()
         if response_budget < 512:
             raise ValueError("Tool response budget must be >= 512")
-        self.response_budget = response_budget
+        self.response_budget, self.session = response_budget, session
 
     def _ids(self, ids):
         if not isinstance(ids, list) or not 1 <= len(ids) <= 10 or any(not isinstance(i, str) for i in ids):
@@ -19,91 +28,163 @@ class TreeTools:
             raise ValueError("Unknown node ID")
         return ids
 
-    def read(self, ids, focus=None):
-        """Return bounded records. Truncated text is explicitly marked.
+    def _record(self, node_id):
+        node = self.index.nodes[node_id]
+        record = {"node_id": node.id, "kind": node.kind, "level": node.level,
+                  "parent": node.parent, "child_count": len(node.children),
+                  "start": node.start, "end": node.end, "blocks": []}
+        for block in node.blocks:
+            row = {"block_id": block.id, "text": block.text, "truncated": False}
+            if node.kind == "leaf":
+                row.update(source_name=self.index.source_name, start=node.start, end=node.end)
+            record["blocks"].append(row)
+        return record
 
-        Source offsets for delivered leaf excerpts refer to exactly the
-        delivered prefix, rather than pretending the entire leaf was read.
+    def new_session(self, directory):
+        """Independent questions never share visited sets or mutable caches."""
+        state = TraversalState()
+        for record in directory["nodes"]:
+            node_id = record["node_id"]
+            state.visited.add(node_id)
+            state.order.append(node_id)
+            state.cache[node_id] = self._record(node_id)
+        return TreeTools(self.index, self.search_engine, tokenizer=self.tokenizer,
+                         response_budget=self.response_budget, session=state)
+
+    def read(self, ids, *, from_cache=False, commit=True):
+        """Emit whole nodes once; defer oversized batches without marking them visited.
+
+        Cached rehydration is explicit and does not traverse the tree again.
+        Oversized single nodes fail rather than silently hide unread text forever.
         """
-        records = []
-        remaining = self.response_budget
-        omitted = []
+        result = {"nodes": [], "omitted_node_ids": [], "already_visited": []}
         for node_id in dict.fromkeys(ids):
-            node = self.index.nodes[node_id]
-            record = {"node_id": node.id, "kind": node.kind, "level": node.level,
-                      "parent": node.parent, "child_count": len(node.children),
-                      "start": node.start, "end": node.end, "blocks": []}
-            ordered = sorted(node.blocks, key=lambda b: b.id not in (focus or set()))
-            for block in ordered:
-                # Reserve identifier/metadata overhead for each block.
-                if remaining < 192:
-                    break
-                excerpt = prefix(block.text, remaining - 192, self.tokenizer)
-                if not excerpt:
-                    break
-                row = {"block_id": block.id, "text": excerpt,
-                       "truncated": len(excerpt) != len(block.text)}
-                if node.kind == "leaf":
-                    row.update(source_name=self.index.source_name, start=node.start,
-                               end=node.start + len(excerpt))
-                record["blocks"].append(row)
-                remaining -= self.tokenizer.count(excerpt) + 192
-            record["blocks_omitted"] = len(node.blocks) - len(record["blocks"])
-            if record["blocks"]:
-                records.append(record)
+            if self.session and node_id in self.session.visited and not from_cache:
+                result["already_visited"].append(node_id)
+                continue
+            if from_cache:
+                if not self.session or node_id not in self.session.cache:
+                    raise ValueError("Cannot restore an unread node from cache")
+                record = self.session.cache[node_id]
             else:
-                omitted.append(node_id)
-        return {"nodes": records, "omitted_node_ids": omitted}
+                record = self.session.cache.get(node_id) if self.session else None
+                record = record or self._record(node_id)
+            if self.tokenizer.count(json.dumps({"nodes": [record]}, ensure_ascii=False)) > self.response_budget:
+                raise ValueError("Node %s exceeds tool response budget; increase --tool-response-budget or reduce chunk/topic sizes" % node_id)
+            result["nodes"].append(record)
+            if self.tokenizer.count(json.dumps(result, ensure_ascii=False)) > self.response_budget:
+                result["nodes"].pop()
+                result["omitted_node_ids"].append(node_id)
+                continue
+        return self._finalize(result, commit=commit, from_cache=from_cache)
 
-    def document_map(self, budget=1600):
-        """Deduplicated chapter/ancestor summaries within a serialized budget."""
-        root = self.index.nodes[self.index.root_id]
-        overview = prefix("\n".join(b.text for b in root.blocks), budget // 3, self.tokenizer)
-        result = {"root_id": root.id, "overview": overview, "chapters": [],
-                  "ancestors": [], "chapters_omitted": 0}
-        sections = {s.id: s for s in self.index.sections}
-        chapters = sorted((n for n in self.index.nodes.values() if n.kind == "chapter"), key=lambda n: n.start)
-        included = {root.id}
-        for chapter in chapters:
-            ancestors, current = [], chapter.parent
-            while current:
-                ancestors.append(current)
-                current = self.index.nodes[current].parent
-            row = {"node_id": chapter.id, "section": sections[chapter.section_id].title,
-                   "summary": prefix(" ".join(b.text for b in chapter.blocks), 120, self.tokenizer),
-                   "ancestors": ancestors, "start": chapter.start, "end": chapter.end}
-            result["chapters"].append(row)
-            if self.tokenizer.count(json.dumps(result, ensure_ascii=False)) > budget:
-                result["chapters"].pop()
-                break
-            for node_id in ancestors:
-                if node_id in included:
-                    continue
-                node = self.index.nodes[node_id]
-                entry = {"node_id": node_id, "summary": prefix(" ".join(b.text for b in node.blocks), 120, self.tokenizer)}
-                result["ancestors"].append(entry)
-                if self.tokenizer.count(json.dumps(result, ensure_ascii=False)) > budget:
-                    result["ancestors"].pop()
-                else:
-                    included.add(node_id)
-        result["chapters_omitted"] = len(chapters) - len(result["chapters"])
+    def _finalize(self, result, *, commit=True, from_cache=False):
+        """Include ranking/page metadata in the same budget before committing visits."""
+        if "entry_node_ids" in result:
+            result["entry_node_ids"] = [n["node_id"] for n in result["nodes"]]
+        while self.tokenizer.count(json.dumps(result, ensure_ascii=False)) > self.response_budget:
+            if not result["nodes"]:
+                raise ValueError("Tool metadata exceeds response budget; reduce top_k, limit, node_ids or batch size")
+            record = result["nodes"].pop()
+            result["omitted_node_ids"].append(record["node_id"])
+            if "entry_node_ids" in result:
+                result["entry_node_ids"] = [n["node_id"] for n in result["nodes"]]
+        if self.session and commit and not from_cache:
+            for record in result["nodes"]:
+                node_id = record["node_id"]
+                if node_id not in self.session.visited:
+                    self.session.visited.add(node_id)
+                    self.session.order.append(node_id)
+                self.session.cache[node_id] = record
         return result
 
-    async def search(self, query, top_k=5, kind=None, min_level=None, max_level=None):
-        hits = await self.search_engine.search(query, top_k, kind, min_level, max_level)
-        # Only bounded node text is returned. Search ranking does not bypass
-        # context limits by including an extra unbounded copy of each hit text.
-        result = self.read([hit.node_id for hit in hits], {hit.block_id for hit in hits})
+    def navigation_state(self):
+        if not self.session:
+            return {}
+        frontier = set()
+        for node_id in self.session.visited:
+            node = self.index.nodes[node_id]
+            frontier.update(node.children)
+            if node.parent:
+                frontier.add(node.parent)
+        frontier -= self.session.visited
+        ordered = sorted(frontier, key=lambda i: (self.index.nodes[i].start, i))
+        return {"visited_count": len(self.session.visited), "recent_node_ids": self.session.order[-16:],
+                "frontier": ordered[:16], "frontier_omitted": max(0, len(ordered) - 16)}
+
+    def document_map(self, budget=0, mode="full"):
+        """All chapter-to-root nodes, deduplicated, with every topic's full text.
+
+        Full mode never silently truncates. Budgeted mode is an explicit fallback
+        for documents whose chapter count/summaries make the directory too large.
+        """
+        if mode not in {"full", "budgeted"} or not isinstance(budget, int) or budget < 0:
+            raise ValueError("Invalid directory mode/budget")
+        if mode == "budgeted" and budget < 512:
+            raise ValueError("Budgeted directory needs map_budget >= 512")
+        chapters = sorted((n for n in self.index.nodes.values() if n.kind == "chapter"), key=lambda n: n.start)
+        upper = {self.index.root_id}
+        for chapter in chapters:
+            current = chapter.id
+            while current:
+                upper.add(current)
+                current = self.index.nodes[current].parent
+        section_titles = {s.id: s.title for s in self.index.sections}
+        result = {"root_id": self.index.root_id, "nodes": [], "total_nodes": len(upper),
+                  "omitted_nodes": len(upper), "mode": mode, "complete": False}
+        # Higher abstractions first; each node appears only once even if shared
+        # by many chapter paths. Actual IDs/text come from this document's index.
+        for node in sorted((self.index.nodes[i] for i in upper), key=lambda n: (-n.level, n.start, n.id)):
+            record = self._record(node.id)
+            record["children"] = [i for i in node.children if i in upper]
+            if node.section_id in section_titles:
+                record["section_title"] = section_titles[node.section_id]
+            result["nodes"].append(record)
+            if budget and self.tokenizer.count(json.dumps(result, ensure_ascii=False)) > budget:
+                result["nodes"].pop()
+                if mode == "full":
+                    raise ValueError("Full chapter-to-root directory exceeds map_budget; increase it or explicitly select budgeted mode")
+                break
+        result["omitted_nodes"] = len(upper) - len(result["nodes"])
+        result["complete"] = not result["omitted_nodes"]
+        if not result["nodes"]:
+            raise ValueError("Directory budget cannot fit the root; increase map_budget")
+        return result
+
+    async def search(self, query=None, top_k=5, kind=None, min_level=None, max_level=None, queries=None):
+        if (query is None) == (queries is None):
+            raise ValueError("Provide exactly one of query or queries")
+        requests = [query] if query is not None else queries
+        if not isinstance(requests, list) or not 1 <= len(requests) <= 8:
+            raise ValueError("queries must contain 1..8 strings")
+        if any(not isinstance(q, str) or not q.strip() for q in requests):
+            raise ValueError("Queries must be nonempty strings")
+        visited = set(self.session.visited) if self.session else set()
+        gate = asyncio.Semaphore(4)
+
+        async def find(q):
+            async with gate:
+                return await self.search_engine.search(q, top_k, kind, min_level, max_level,
+                                                      unique_nodes=True, exclude_nodes=visited)
+        batches = await asyncio.gather(*(find(q) for q in requests))
+        candidates = {}
+        for hits in batches:
+            for hit in hits:
+                if hit.node_id not in candidates or hit.score > candidates[hit.node_id].score:
+                    candidates[hit.node_id] = hit
+        hits = sorted(candidates.values(), key=lambda h: (-h.score, h.start, h.node_id))[:top_k]
+        result = self.read([hit.node_id for hit in hits], commit=False)
         result["matches"] = [{"node_id": h.node_id, "block_id": h.block_id,
                               "score": h.score, "kind": h.kind, "level": h.level} for h in hits]
-        return result
+        result["entry_node_ids"] = []
+        return self._finalize(result)
 
     def move_up(self, node_ids):
         ids = self._ids(node_ids)
         parents = list(dict.fromkeys(self.index.nodes[i].parent for i in ids if self.index.nodes[i].parent))
-        result = self.read(parents)
+        result = self.read(parents, commit=False)
         result["at_root"] = [i for i in ids if self.index.nodes[i].parent is None]
-        return result
+        return self._finalize(result)
 
     def move_down(self, node_ids, offset=0, limit=5):
         ids = self._ids(node_ids)
@@ -119,6 +200,6 @@ class TreeTools:
             pages.append({"node_id": node_id, "total": len(node.children),
                           "next_offset": offset + limit if offset + limit < len(node.children) else None,
                           "selected_node_ids": selected})
-        result = self.read(children)
+        result = self.read(children, commit=False)
         result["pages"] = pages
-        return result
+        return self._finalize(result)

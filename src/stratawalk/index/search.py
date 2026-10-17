@@ -32,7 +32,8 @@ class SemanticSearch:
         if index.metadata.get("embedder") != embedder.name:
             raise ValueError("Use the same embedding provider/model as index construction")
 
-    async def search(self, query, top_k=5, kind=None, min_level=None, max_level=None) -> List[SearchHit]:
+    async def search(self, query, top_k=5, kind=None, min_level=None, max_level=None,
+                     *, unique_nodes=False, exclude_nodes=None) -> List[SearchHit]:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("Query cannot be empty")
         if not isinstance(top_k, int) or isinstance(top_k, bool) or not 1 <= top_k <= 50:
@@ -48,6 +49,8 @@ class SemanticSearch:
         vector = (await self.embedder.embed([query]))[0]
         hits = []
         for node in self.index.nodes.values():
+            if exclude_nodes and node.id in exclude_nodes:
+                continue
             if kind and node.kind != kind:
                 continue
             if min_level is not None and node.level < min_level:
@@ -57,4 +60,14 @@ class SemanticSearch:
             for block in node.blocks:
                 hits.append(SearchHit(node.id, block.id, cosine(vector, block.embedding),
                                       node.level, node.kind, node.start, node.end, block.text))
-        return sorted(hits, key=lambda h: (-h.score, h.start, h.node_id, h.block_id))[:top_k]
+        ranked = sorted(hits, key=lambda h: (-h.score, h.start, h.node_id, h.block_id))
+        if not unique_nodes:
+            return ranked[:top_k]
+        seen, selected = set(), []
+        for hit in ranked:
+            if hit.node_id not in seen:
+                selected.append(hit)
+                seen.add(hit.node_id)
+                if len(selected) == top_k:
+                    break
+        return selected

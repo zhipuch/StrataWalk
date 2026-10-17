@@ -91,17 +91,52 @@ Useful build flags:
 | `--embedding-limit` | 1024 | Maximum block size sent for embedding |
 | `--reduction-input` | 4096 | Total input block text per summary group |
 | `--summary-size` | 512 | Maximum combined output block text |
+| `--max-topics` | 6 | Maximum topic blocks in one parent |
+| `--topic-size` | 256 | Maximum text per topic, capped by embedding limit |
+| `--summary-retries` | 2 | Corrective retries after invalid LLM output |
 | `--context-limit` | 16384 | Summary model context budget including reserves |
 | `--concurrency` | 4 | Maximum simultaneous model/embedding requests |
 | `--max-children` | 8 | Maximum children grouped in one reduction |
 
-If a summary exceeds its budget, the build fails explicitly. Use a more concise
-summarizer or adjust budgets while keeping the model's real context limit.
-If prompt serialization exceeds context, lower `--reduction-input` or
-`--max-children`. Model requests retry transient HTTP 429 and selected 5xx errors.
+LLM summaries are validated for JSON schema, topic count, total length and
+per-topic length. Invalid results trigger up to `--summary-retries` corrective
+regenerations, then fail explicitly. Full prompt/input/output reserves are
+checked before each call. Overfull groups are reduced in smaller contiguous
+subgroups; a pair that cannot fit requires smaller chunks/summaries or a larger
+context. Transient HTTP 429 and selected 5xx responses have separate retries.
 
 For `ask`, `--context-limit` defaults to 24000 and `--output-reserve` to 2048.
-`--max-steps` bounds exploration. `--json` returns answer, citations, and status.
+`--max-steps` bounds policy turns; each turn can issue up to `--parallel-actions`
+independent read actions (default 4). Source citations and summary citations are
+explicitly distinguished in JSON and CLI output. `--json` returns the answer,
+citations and status.
+
+### System directory and visit deduplication
+
+By default, the system prompt includes every chapter node and its ancestors,
+with all their topic text. These nodes count as read. Their contents can support
+an overview directly; a precise answer still requires source evidence.
+
+The default `--directory-mode full --map-budget 0` never silently drops directory
+nodes. The model context remains the hard limit. If the directory is too large,
+choose a larger context or deliberately opt into a partial directory:
+
+```bash
+stratawalk ask .stratawalk/report.json 'Compare the conclusions' \
+  --directory-mode budgeted --map-budget 3000
+```
+
+Partial mode explicitly reports omissions and retains node IDs for navigation.
+Actual directory size depends on chapter count and topic lengths; upper-level
+geometric reduction alone is not proof that the full directory always fits.
+
+Embedding search selects distinct unvisited entry nodes. The policy can search
+several subquestions and batch independent up/down moves; a shared per-question
+visited set prevents duplicate node reads. Compaction restores cached content
+without another traversal. Omitted nodes can be requested in a narrower batch.
+Use `--tool-response-budget` (default 4096) for larger individual nodes, while
+also providing sufficient total context. Metadata counts toward this budget.
+
 CLI exit codes: 0 for success; 1 for invalid inputs/provider failure; 2 for
 insufficient evidence or an exhausted agent budget.
 
