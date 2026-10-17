@@ -1,0 +1,141 @@
+import asyncio
+from copy import deepcopy
+from pathlib import Path
+import tempfile
+import unittest
+from stratawalk import BuildConfig, IndexBuilder, load_index, save_index
+from stratawalk.index.search import SemanticSearch
+from stratawalk.parsing import MarkdownSectionParser
+from stratawalk.providers.offline import ExtractiveSummarizer, HashEmbedder
+from stratawalk.tokenization import ByteTokenizer, chunk_spans
+
+TEXT = "# Report\n\n## Alpha\n" + "alpha apples evidence. " * 35 + "\n## Beta\n" + "beta oranges memory. " * 40
+
+
+def builder(**kwargs):
+    tokenizer = ByteTokenizer()
+    config = BuildConfig(chunk_size=100, chunk_overlap=20, summary_size=48,
+                         reduction_input=220, max_children=4, **kwargs)
+    return IndexBuilder(ExtractiveSummarizer(tokenizer), HashEmbedder(), config=config)
+
+
+class IndexTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.index = await builder().build(TEXT, "report.md")
+
+    async def test_full_coverage_order_and_budget(self):
+        self.index.validate()
+        tokenizer = ByteTokenizer()
+        leaves = sorted((n for n in self.index.nodes.values() if n.kind == "leaf"), key=lambda n: n.start)
+        covered = set()
+        for leaf in leaves:
+            covered.update(range(leaf.start, leaf.end))
+            self.assertLessEqual(tokenizer.count(leaf.blocks[0].text), 100)
+        self.assertEqual(covered, set(range(len(TEXT))))
+        chapters = [n for n in self.index.nodes.values() if n.kind == "chapter"]
+        self.assertEqual(len(chapters), 3)  # preamble is preserved
+        self.assertGreater(self.index.nodes[self.index.root_id].level, 2)
+        for node in self.index.nodes.values():
+            if node.kind != "leaf":
+                self.assertLessEqual(sum(tokenizer.count(b.text) for b in node.blocks), 48)
+
+    async def test_round_trip_and_corrupt_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "index.json"
+            save_index(self.index, path)
+            restored = load_index(path)
+            self.assertEqual(restored, self.index)
+            data = path.read_text().replace('"schema_version": 1', '"schema_version": 99')
+            path.write_text(data)
+            with self.assertRaises(ValueError):
+                load_index(path)
+        corrupt = deepcopy(self.index)
+        corrupt.nodes[corrupt.root_id].children.reverse()
+        with self.assertRaises(ValueError):
+            corrupt.validate()
+
+    async def test_multiscale_search_and_provider_mismatch(self):
+        search = SemanticSearch(self.index, HashEmbedder())
+        hits = await search.search("beta oranges memory", 5, "leaf")
+        self.assertTrue(all(h.kind == "leaf" for h in hits))
+        self.assertIn("beta", hits[0].text.lower())
+        roots = await search.search("report", 1, "root")
+        self.assertEqual(roots[0].node_id, self.index.root_id)
+        with self.assertRaises(ValueError):
+            SemanticSearch(self.index, HashEmbedder(64))
+        with self.assertRaises(ValueError):
+            await search.search("query", 0)
+
+    async def test_concurrent_calls_are_bounded(self):
+        class Observed(ExtractiveSummarizer):
+            active = peak = 0
+            async def summarize(self, blocks, budget):
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                try:
+                    await asyncio.sleep(0.001)
+                    return await super().summarize(blocks, budget)
+                finally:
+                    self.active -= 1
+        observed = Observed(ByteTokenizer())
+        instance = builder(concurrency=2)
+        instance.summarizer = observed
+        await instance.build(TEXT)
+        self.assertEqual(observed.peak, 2)
+
+    async def test_single_tiny_document(self):
+        index = await builder().build("中")
+        index.validate()
+        self.assertEqual(index.nodes[index.root_id].kind, "root")
+        with self.assertRaises(ValueError):
+            await builder().build("  ")
+
+    async def test_summary_blocks_respect_embedding_limit(self):
+        class Paragraphs:
+            async def summarize(self, blocks, budget):
+                return ["x" * min(budget, 64)]
+        config = BuildConfig(chunk_size=40, chunk_overlap=5, embedding_limit=40,
+                             summary_size=80, reduction_input=160, max_children=4)
+        index = await IndexBuilder(Paragraphs(), HashEmbedder(), config=config).build("Evidence " * 60)
+        self.assertTrue(any(len(n.blocks) > 1 for n in index.nodes.values()))
+        for block in index.block_map().values():
+            self.assertLessEqual(ByteTokenizer().count(block.text), 40)
+            self.assertEqual(len(block.embedding), 256)
+
+    async def test_nonshrinking_summary_is_rejected(self):
+        class Bad:
+            async def summarize(self, blocks, budget):
+                return ["x" * (budget + 1)]
+        instance = builder()
+        instance.summarizer = Bad()
+        with self.assertRaisesRegex(ValueError, "output budget"):
+            await instance.build(TEXT)
+
+
+class SourceTests(unittest.TestCase):
+    def test_unicode_overlap_and_exact_offsets(self):
+        text = "树索引与agent🙂" * 10
+        spans = chunk_spans(text, 30, 8, ByteTokenizer())
+        self.assertEqual(spans[0][0], 0)
+        self.assertEqual(spans[-1][1], len(text))
+        for previous, current in zip(spans, spans[1:]):
+            self.assertGreater(current[0], previous[0])
+            self.assertLessEqual(current[0], previous[1])
+            self.assertLessEqual(ByteTokenizer().count(text[current[0]:current[1]]), 30)
+
+    def test_fenced_headings_are_not_sections(self):
+        text = "# Report\n## First\n```md\n## Fake\n```\n## Second\nText\n"
+        sections = MarkdownSectionParser().parse(text)
+        self.assertEqual([s.title for s in sections], ["Preamble", "First", "Second"])
+        self.assertEqual("".join(text[s.start:s.end] for s in sections), text)
+
+    def test_invalid_reduction_budget(self):
+        with self.assertRaises(ValueError):
+            BuildConfig(reduction_input=100).validate()
+
+    def test_whitespace_preamble_and_long_blank_runs(self):
+        # Blank regions are still source data and must retain exact coverage.
+        text = " " * 250 + "\n## Chapter\nContent."
+        index = asyncio.run(builder().build(text))
+        index.validate()
+        self.assertEqual(index.source_text, text)

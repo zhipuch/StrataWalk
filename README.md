@@ -6,9 +6,9 @@
 
 **Zoom out for perspective. Zoom in for evidence.**
 
-[Watch the Walk](#watch-the-walk) · [How It Works](#how-it-works) · [Architecture](docs/architecture.md) · [Roadmap](#roadmap)
+[Quick Start](#quick-start) · [Watch the Walk](#watch-the-walk) · [How It Works](#how-it-works) · [Architecture](docs/architecture.md) · [Roadmap](#roadmap)
 
-<sub>🚧 Design preview · Implementation and benchmarks forthcoming</sub>
+<sub>🚧 Early implementation · Offline demo available · Benchmarks forthcoming</sub>
 
 </div>
 
@@ -20,6 +20,23 @@ The whole document reveals **how the argument fits together**.
 **StrataWalk gives agents a way to move between these scales.**
 It builds an ordered hierarchy from source passages to a document overview,
 then lets an agent search, explore, and return to the original evidence.
+
+## Quick Start
+
+Run the offline example with Python 3.9+; no API key or runtime dependencies:
+
+```bash
+git clone https://github.com/zhipuch/StrataWalk.git
+cd StrataWalk
+PYTHONPATH=src python3 examples/offline_demo.py
+```
+
+The example builds a persisted tree, searches source passages, and prints
+source references. Its extractive summaries, hashed lexical vectors, and
+scripted policy are development fixtures—not quality benchmarks.
+
+**Use a real LLM:** [Model setup and CLI commands](docs/usage.md) ·
+**Explore the implementation:** [Code map and extension points](docs/development.md)
 
 ## Build the Index
 
@@ -96,7 +113,7 @@ source references, and unresolved questions.
 | `compact_context` | “Keep the findings and citations; make room to continue.” |
 | `finish` | “The evidence supports an answer—or the remaining gap must be stated.” |
 
-*Proposed tool contracts, not released API signatures.*
+*Implemented as JSON tool actions selected by a model policy; see [usage](docs/usage.md).*
 
 ## Why This Design?
 
@@ -122,13 +139,16 @@ remain targets for reproducible evaluation.
 
 ## Roadmap
 
-- [ ] **Build the memory:** parsing, ordered recursive summaries, embeddings, persistent tree links.
-- [ ] **Enable the walk:** search, batched navigation, context compaction, evidence tracking.
+- [x] **Build the memory:** parsing, ordered recursive summaries, embeddings, persistent tree links.
+- [x] **Enable the walk:** search, batched navigation, context compaction, evidence tracking.
 - [ ] **Show it working:** runnable example, real execution recording, source-grounded answers.
 - [ ] **Measure it:** indexing cost and latency, evidence recall, answer quality, and ablations.
 
-This repository currently publishes the design and explanatory visuals.
-Installation instructions and runnable examples will accompany the implementation.
+The first implementation supports Markdown/TXT, JSON index persistence,
+exact cosine search across all levels, and a bounded tool-using Agent runtime.
+A compatible HTTP adapter connects real chat and embedding models; provider
+quality and live behavior still require validation with your selected service.
+PDF/OCR, ANN search, resumable construction, and benchmarks remain future work.
 
 ## Related Work
 

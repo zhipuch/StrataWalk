@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stratawalk"
+version = "0.1.0"
+description = "Ordered summary trees and agent-directed navigation for long documents"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+llamaindex = [
+    "llama-index-core>=0.10,<0.12; python_version < '3.10'",
+    "llama-index-core>=0.12,<1; python_version >= '3.10'",
+]
+tokenizer = ["tiktoken>=0.7,<1"]
+
+[project.scripts]
+stratawalk = "stratawalk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

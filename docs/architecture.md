@@ -17,11 +17,9 @@ Build bottom-up · Search across scales · Navigate with intent · Answer with e
 
 ---
 
-> Project status — Design preview
->
-> This repository introduces the proposed architecture of StrataWalk.
-> Implementation, runnable examples, and benchmarks are planned.
-> Capabilities described below are design targets unless explicitly marked as released.
+> **Architecture notes.** The core design is now implemented. See
+> [usage](usage.md) for runnable commands and [development](development.md)
+> for precise implementation boundaries. Some goals below remain planned.
 
 ## Why StrataWalk?
 
@@ -205,7 +203,7 @@ a chapter summary, an intermediate topic, or a source leaf.
 ## Agent Tools
 
 The following interfaces describe the proposed tool contract.
-They are not released API signatures.
+The current JSON action interfaces are described in [development notes](development.md).
 
 | Tool | Purpose | Expected behavior |
 |---|---|---|
@@ -291,7 +289,7 @@ The construction pipeline is designed around parallel work:
 - Summarize independent groups concurrently.
 - Process independent chapters in parallel.
 - Schedule parent tasks as soon as their children are ready.
-- Cache completed artifacts to support resumable construction.
+- Cache completed artifacts to support resumable construction (planned).
 
 Parent–child dependencies still constrain execution. A parent cannot be
 summarized before its children exist.
@@ -308,11 +306,11 @@ No performance advantage is claimed before reproducible measurements.
 
 StrataWalk draws on hierarchical retrieval and agentic document navigation.
 
-- PageIndex demonstrates
+- [PageIndex](https://github.com/VectifyAI/PageIndex) demonstrates
   reasoning-based retrieval over document trees and emphasizes vectorless
   navigation. StrataWalk's proposed design combines explicit tree navigation
   with embeddings at multiple abstraction levels.
-- RAPTOR introduces recursive embedding,
+- [RAPTOR](https://arxiv.org/abs/2401.18059) introduces recursive embedding,
   clustering, and summarization for tree-organized retrieval. StrataWalk
   focuses on source-ordered reduction and a tool-driven navigation loop
   with explicit working-context management.
@@ -346,23 +344,23 @@ Ablations should test:
 
 ## Roadmap
 
-- [ ] Define node, block, provenance, and storage schemas.
-- [ ] Implement section parsing and token-aware source chunking.
-- [ ] Implement ordered recursive reduction with bounded outputs.
-- [ ] Add embeddings for source and summary blocks.
-- [ ] Add persistent tree links and source-span lookup.
-- [ ] Implement search and batched navigation tools.
-- [ ] Add context compaction and an evidence ledger.
-- [ ] Add citation-grounded answer generation.
-- [ ] Add concurrency, caching, retries, and resumable indexing.
-- [ ] Publish an end-to-end example and reproducible benchmarks.
+- [x] Define node, block, provenance, and storage schemas.
+- [x] Implement section parsing and token-aware source chunking.
+- [x] Implement ordered recursive reduction with bounded outputs.
+- [x] Add embeddings for source and summary blocks.
+- [x] Add persistent tree links and source-span lookup.
+- [x] Implement search and batched navigation tools.
+- [x] Add context compaction and an evidence ledger.
+- [x] Add citation-grounded answer generation.
+- [x] Add bounded concurrency and transient HTTP retries.
+- [x] Publish an offline end-to-end example.
+- [ ] Add caching and resumable indexing.
+- [ ] Publish live-model evaluation and reproducible benchmarks.
 
 ## Current Availability
 
-This initial release contains the design document.
-
-Installation instructions, supported model providers, document formats,
-and runnable examples will be published alongside the implementation.
+A first implementation and offline example are available. See [usage](usage.md).
+Real-provider quality and live Agent behavior have not yet been benchmarked.
 
 ## Contributing
 
