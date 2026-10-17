@@ -149,10 +149,6 @@ example, expected evidence, and the failure you observed.
 
 ---
 
-<div align="center">
+**StrataWalk** · Hierarchical memory for long-document agents.
 
-**Give agents a map, a memory, and a way to explore.**
-
-Created by [zhipuch](https://github.com/zhipuch)
-
-</div>
+Maintained by [@zhipuch](https://github.com/zhipuch) · [Architecture](docs/architecture.md) · [Feedback & ideas](https://github.com/zhipuch/StrataWalk/issues)
