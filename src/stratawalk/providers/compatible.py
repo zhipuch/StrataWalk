@@ -7,13 +7,20 @@ import asyncio
 import json
 import math
 import urllib.error
+from urllib.parse import urlsplit
 import urllib.request
 
 
 class CompatibleClient:
     def __init__(self, base_url, api_key, timeout=90, retries=2):
-        if not base_url.startswith(("https://", "http://localhost", "http://127.0.0.1")):
+        endpoint = urlsplit(base_url)
+        if not endpoint.hostname or (endpoint.scheme != "https" and not (
+                endpoint.scheme == "http" and endpoint.hostname in {"localhost", "127.0.0.1", "::1"})):
             raise ValueError("Use HTTPS or a localhost HTTP endpoint")
+        if endpoint.username is not None or endpoint.password is not None or endpoint.query or endpoint.fragment:
+            raise ValueError("Base URL must not contain credentials, a query or a fragment")
+        # Validate ports now, before building or persisting a provider identity.
+        _ = endpoint.port
         self.base_url = base_url.rstrip("/")
         self.api_key, self.timeout, self.retries = api_key, timeout, retries
 

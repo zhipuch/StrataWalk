@@ -1,29 +1,47 @@
 <div align="center">
 
-<img src="assets/hero.png" alt="StrataWalk — Long documents. Navigable memory. Ordered summary trees, multi-scale search, and agentic navigation." width="100%">
+<img src="assets/hero.png" alt="StrataWalk — Long context. Navigable memory. Ordered summary trees, multi-scale search, and agent-directed navigation." width="100%">
 
-### Hierarchical memory for long-document agents
+### Hierarchical memory for long-context agents
 
 **Zoom out for perspective. Zoom in for evidence.**
 
-[Quick Start](#quick-start) · [Watch the Walk](#watch-the-walk) · [How It Works](#how-it-works) · [Architecture](docs/architecture.md) · [Roadmap](#roadmap)
+[Quick Start](#quick-start) · [The Design](#the-stratawalk-design) · [Beyond Documents](#long-context-beyond-documents) · [Watch the Walk](#watch-the-walk) · [Architecture](docs/architecture.md)
 
-<sub>🚧 Early implementation · Offline demo available · Benchmarks forthcoming</sub>
+<sub>Early implementation · Markdown/TXT today · Offline demo available · Live-model benchmarks pending</sub>
 
 </div>
 
 ---
 
-A passage tells you **what happened**. A chapter explains **why**.
-The whole document reveals **how the argument fits together**.
+A precise question needs a passage. A comparison needs several regions.
+An explanation needs the larger picture—and a way back to its supporting details.
 
-**StrataWalk gives agents a way to move between these scales.**
-It builds an ordered hierarchy from source passages to a document overview,
-then lets an agent search, explore, and return to the original evidence.
+**StrataWalk turns long, ordered text into navigable external memory.**
+It builds a source-ordered summary tree, makes source passages and summary topics
+searchable, and lets an agent change reading scale as the question develops.
+The tree persists outside the model context; each question uses a bounded workspace.
+
+Long documents are the first implementation. The underlying design targets
+**long-context exploration** wherever material can be segmented, organized,
+and linked back to stable source evidence.
+
+## The StrataWalk Design
+
+| Mechanism | What it gives the agent |
+| :--- | :--- |
+| **Source order as the backbone** | Adjacent passages reduce into adjacent higher-level regions, retaining the progression of an argument or sequence. |
+| **Search at every scale** | Source chunks and individual summary topics have embeddings. A question can enter at a detail, a theme, or an overview. |
+| **A walk that changes direction** | Move up for context, down for supporting detail, or search for another branch. Entry points and actions depend on the question. |
+| **Persistent memory, bounded working context** | Keep the index outside the prompt. Load whole nodes as needed; compact working notes and restore cached evidence. |
+
+**The distinctive combination is ordered abstraction + semantic entry + explicit
+navigation + context management.** Summaries orient the walk; original passages
+support precise claims.
 
 ## Quick Start
 
-Run the offline example with Python 3.9+; no API key or runtime dependencies:
+Python 3.9+, no API key or third-party runtime dependencies:
 
 ```bash
 git clone https://github.com/zhipuch/StrataWalk.git
@@ -31,147 +49,150 @@ cd StrataWalk
 PYTHONPATH=src python3 examples/offline_demo.py
 ```
 
-The example builds a persisted tree, searches source passages, and prints
-source references. Its extractive summaries, hashed lexical vectors, and
-scripted policy are development fixtures—not quality benchmarks.
+The example builds `.stratawalk/example.json`, retrieves source excerpts,
+and prints character-offset citations and a `search → finish` trace.
+Extractive summaries, hashed lexical vectors, and a scripted policy make this
+an offline plumbing demonstration. Real models choose their own tool actions.
 
-**Use a real LLM:** [Model setup and CLI commands](docs/usage.md) ·
-**Explore the implementation:** [Code map and extension points](docs/development.md) ·
-[Algorithm and engineering review](docs/implementation-review.md)
+Try your own UTF-8 Markdown/TXT file:
+
+```bash
+PYTHONPATH=src python3 -m stratawalk build notes.md --output .stratawalk/notes.json
+PYTHONPATH=src python3 -m stratawalk inspect .stratawalk/notes.json
+PYTHONPATH=src python3 -m stratawalk ask .stratawalk/notes.json 'Which findings disagree?' --json
+```
+
+These commands default to the offline fixtures. For LLM summaries and an
+LLM-directed walk, configure chat and embedding endpoints and pass
+`--provider compatible` to both `build` and `ask`: [model setup and usage](docs/usage.md).
+
+## Long Context, Beyond Documents
+
+The reusable unit is **source text → ordered hierarchy → searchable blocks →
+question-directed exploration**. Document chapters are one way to define regions;
+the Python API accepts a custom section parser with exact source offsets.
+
+| Material | Natural regions | Support today / work needed |
+| :--- | :--- | :--- |
+| Reports, books, manuals | Chapters and sections | Markdown/TXT indexing and querying implemented; PDF/OCR needs an adapter. |
+| Conversation history, meeting transcripts | Sessions, turns, time ranges | A text snapshot can be indexed; speaker/time metadata and update policies need adapters. |
+| Research notes, collected evidence | Items, topics, source groups | One combined text snapshot works; separate source identities and corpus routing need extensions. |
+| Code and execution traces | Files, symbols, execution stages | Text is indexable; syntax, dependencies, and exact code analysis need task-specific tools and links. |
+
+**This is a general design for organizing long context; its usefulness depends
+on the workload.** Stable source references, meaningful segmentation, and useful
+abstractions are the key assumptions. Streaming memory needs incremental updates
+and invalidation. Graph-shaped relationships need links beyond a tree. Exact
+counts, exhaustive checks, and lossless transformations need direct source processing.
+
+The current release builds **one static text index at a time**. Broader workloads
+are extension directions; they have not been validated by benchmarks.
+See [scope and assumptions](docs/architecture.md#scope-and-assumptions).
 
 ## Build the Index
 
-<img src="assets/index-build.gif" alt="Bottom-up indexing: overlapping chunks become leaves; LLM reduction creates chapter nodes containing multiple summary blocks; repeated reduction produces a root with h blocks. All source and summary blocks are embedded." width="100%">
+<img src="assets/index-build.gif" alt="Ordered source chunks become leaves. Adjacent groups reduce into nodes with multiple summary topics, then into a root. Source and summary blocks receive embeddings." width="100%">
 
-**The tree is the index.** `R`, `C1`, `C2`, and `L1`–`L4` are illustrative
-node IDs, not execution steps. Each upper node contains several logical blocks
-(summary paragraphs or topics), each with an embedding. Leaf nodes retain
-source chunks and their embeddings. Parent–child edges describe the index structure.
+**Build upward, preserve the path downward.** A node is a structural container;
+a block is an individually searchable piece of text inside it.
 
-The compact drawing shows two chapters and omits intermediate reduction levels.
-Actual chapter count, tree depth, and block counts depend on the document and
-model budgets. Overlapping chunks and adjacent groups preserve source order.
+```text
+Root: overview topics                         ← summary blocks + embeddings
+├── Section: themes and conclusions            ← summary blocks + embeddings
+│   ├── Passage-group summary                  ← intermediate levels as needed
+│   │   ├── Source chunk                       ← exact text + embedding + offsets
+│   │   └── Source chunk
+│   └── …
+└── Section: themes and conclusions
+    └── …
+```
+
+1. Parse sections; split each into overlapping, budget-bounded source chunks.
+2. Summarize adjacent groups into bounded topic blocks, then reduce upward.
+3. Embed source and summary blocks; persist the tree, source spans, and input provenance.
+
+Independent reductions run concurrently. A parent starts when **its own children**
+are ready, allowing work to progress across levels without a whole-level barrier.
+Embeddings are currently batched after summary construction.
+
+Tree depth, section count, and topic counts depend on the input and budgets.
+Summary provenance records the child input group; it is not claim-level attribution.
+The default parser is standalone Markdown; LlamaIndex parsing is optional.
 
 ## Watch the Walk
 
-<img src="assets/agent-walk.gif" alt="Agent navigation on a fixed tree index: select multiple entry nodes using a document map or embedding search, read their blocks, follow parent and child links, compact the workspace, and finish." width="100%">
+<img src="assets/agent-walk.gif" alt="A question guides entry selection, inspection, upward or downward navigation, context compaction, and a cited answer on a persistent tree." width="100%">
 
-**The right-hand panel shows Agent actions; the left-hand tree remains the index.**
-The agent understands or decomposes the question, selects m entry nodes using
-the chapter/ancestor map or embedding search, and evaluates whether it has
-enough information. It can move upward for abstraction, downward for detail,
-or search again. Independent branches can be explored concurrently.
+**The tree is the memory. The walk is the investigation.**
+One coordinating agent can decompose a question and explore independent branches
+with concurrent tool actions. Each question shares a visited set across branches;
+cached restoration lets evidence return to the prompt without another traversal.
 
-The animation illustrates possible actions, not a mandatory sequence.
-Compaction manages the active context without rebuilding the tree.
-The system prompt contains the full chapter-to-root directory by default;
-independent branches share a per-question visited set to avoid duplicate reads.
-
-<sub>Both animations illustrate the proposed mechanism. They are not live execution recordings or benchmark results.</sub>
-
-[View the index structure](assets/index-structure.png) · [View the navigation still](assets/agent-walk-poster.png) · [Regenerate the visuals](scripts/render_visuals.py)
-
-## How It Works
-
-| 01 · Build memory | 02 · Find a starting point | 03 · Follow the evidence |
-| :--- | :--- | :--- |
-| Split sections into overlapping source passages. Recursively summarize adjacent groups into higher-level nodes. | Search embeddings of source passages and summary blocks, or begin with a compact document map. | Move upward for context and downward for detail. Gather evidence across branches and answer with citations. |
-
-### One document. Multiple reading scales.
-
-```text
-Root node R: [block 1, ..., block h]
-├── Chapter node C1: [summary block 1, ..., block k]
-│   ├── Leaf L1: source chunk + embedding
-│   ├── Leaf L2: source chunk + embedding
-│   └── ...
-├── Chapter node C2: [summary block 1, ..., block k]
-│   └── ...
-└── ...
-```
-
-*Intermediate levels are omitted. All summary blocks also have embeddings;
-block counts can vary between nodes.*
-
-**Build upward.** LlamaIndex-based processing establishes source sections.
-Token-bounded passages become leaves. Adjacent groups are summarized into
-nodes containing individually searchable topic blocks, then reduced again
-until they fit a compact root budget.
-
-**Explore in either direction.** The agent starts at a useful scale, reads,
-identifies what is missing, and selects its next action. Search remains
-available throughout the walk.
-
-**Keep memory outside the context window.** The persistent tree stores the
-document. A bounded workspace and evidence ledger hold the current investigation,
-source references, and unresolved questions.
-
-## The Agent's Toolkit
-
-| Tool | When the agent needs it |
+| Tool | Purpose |
 | :--- | :--- |
-| `search` | “Find another relevant region or a better entry point.” |
-| `move_up` | “I need the broader context around this detail.” |
-| `move_down` | “Show me the supporting passages.” |
-| `compact_context` | “Keep the findings and citations; make room to continue.” |
-| `finish` | “The evidence supports an answer—or the remaining gap must be stated.” |
+| `search` | Find distinct entry nodes using one query or several subqueries. |
+| `move_up` | Follow parent links toward broader context. |
+| `move_down` | Inspect finer detail through paginated child reads. |
+| `compact_context` | Retain working notes and restore selected cached nodes. |
+| `finish` | Return a cited answer or state the remaining evidence gap. |
 
-*Implemented as JSON tool actions selected by a model policy; see [usage](docs/usage.md).*
+The system directory includes all section-to-root topics by default. Those nodes
+already count as read. An overview may cite these summaries directly; precise
+answers require at least one read source-leaf citation. Result records distinguish
+`source` from `summary` evidence. Citation validation checks references and scope;
+semantic support still requires evaluation.
 
-## Why This Design?
+A full directory can grow beyond the model context. Full mode fails explicitly;
+`--directory-mode budgeted --map-budget …` opts into a partial map. Tool results
+and policy requests are budgeted as serialized messages. The default counter
+uses UTF-8 bytes; calibrated model-token accounting needs a suitable tokenizer.
 
-- **Preserve the document's progression.** Adjacent regions are reduced in source order.
-- **Make every scale searchable.** Embed original passages and generated summary blocks.
-- **Connect perspective to proof.** Summary blocks retain links to supporting children.
-- **Let the question guide the walk.** Begin at the overview, a chapter, or a source passage.
-- **Build through concurrent work.** Independent groups can be summarized in parallel;
-  each parent starts as soon as its own children are ready, without a whole-level barrier.
+<sub>The animations are mechanism illustrations, not execution recordings or benchmark results. Node IDs and paths are illustrative; actions are optional.</sub>
 
-Summaries guide exploration. Specific facts, figures, and quotations should
-be verified against source text. Indexing speed, retrieval quality, and cost
-remain targets for reproducible evaluation.
+[Static index](assets/index-structure.png) · [Navigation still](assets/agent-walk-poster.png) · [Regenerate visuals](scripts/render_visuals.py)
 
-## Questions Worth Exploring
+## Current Status
 
-| Question | Reading behavior |
+| Available | Still to build or validate |
 | :--- | :--- |
-| “What is the central argument?” | Start with the overview; inspect the major themes. |
-| “Which experiments support this conclusion?” | Follow the conclusion down to results and limitations. |
-| “How do these chapters disagree?” | Compare source evidence across separate branches. |
-| “Where is this number justified?” | Locate the passage and verify its surrounding context. |
+| Markdown/TXT parsing, exact source spans, ordered recursive topic summaries | PDF/OCR, native conversation/code/corpus adapters |
+| All-level embeddings, exact cosine search, atomic JSON persistence | ANN search, incremental updates, checkpoint/resume |
+| Batched navigation, shared visit state, bounded prompts, evidence ledger and traces | Live-model summary fidelity, answer quality, and retrieval efficiency |
+| Offline end-to-end example and local regression tests | Reproducible benchmarks and a real model execution recording |
 
-## Roadmap
+The HTTP adapter supports compatible text chat and embedding endpoints, with
+bounded transient retries and corrective summary regeneration. Compatibility
+and quality must be checked with the selected service. Core runtime uses only
+the Python standard library.
 
-- [x] **Build the memory:** parsing, ordered recursive summaries, embeddings, persistent tree links.
-- [x] **Enable the walk:** search, batched navigation, context compaction, evidence tracking.
-- [ ] **Show it working:** runnable example, real execution recording, source-grounded answers.
-- [ ] **Measure it:** indexing cost and latency, evidence recall, answer quality, and ablations.
-
-The first implementation supports Markdown/TXT, JSON index persistence,
-exact cosine search across all levels, and a bounded tool-using Agent runtime.
-A compatible HTTP adapter connects real chat and embedding models; provider
-quality and live behavior still require validation with your selected service.
-PDF/OCR, ANN search, resumable construction, and benchmarks remain future work.
+The next priority is **reproducible evaluation**: measure source-evidence
+recall, citation support, cross-region answer completeness, indexing cost, latency,
+and peak prompt size against flat retrieval and full-context prompting where it fits.
+See the [evaluation plan](docs/architecture.md#evaluation-plan) and
+[implementation review](docs/implementation-review.md).
 
 ## Related Work
 
-[PageIndex](https://github.com/VectifyAI/PageIndex) explores reasoning-based
-retrieval over document trees. [RAPTOR](https://arxiv.org/abs/2401.18059)
-develops recursive embedding, clustering, and summarization for hierarchical
-retrieval. StrataWalk explores **source-ordered reduction, multi-scale semantic
-entry points, and agent-directed navigation with explicit context management**.
+[PageIndex](https://github.com/VectifyAI/PageIndex) explores vectorless,
+reasoning-based retrieval over document trees.
+[RAPTOR](https://arxiv.org/abs/2401.18059) recursively embeds, clusters, and
+summarizes text for retrieval across abstraction levels.
 
-See the [detailed architecture](docs/architecture.md) for token budgets,
-node/block structure, provenance, and evaluation plans.
+StrataWalk builds on hierarchical retrieval with **source-ordered reduction,
+embedded topics at every level, and an explicit navigation loop with bounded
+working context**. Quality and efficiency comparisons remain open until benchmarked.
 
-## Help Shape StrataWalk
+## Contribute a Difficult Question
 
-Have a long-document question that your current retrieval workflow struggles with?
-[Open an issue](https://github.com/zhipuch/StrataWalk/issues) with a shareable
-example, expected evidence, and the failure you observed.
+A useful test case includes shareable source material, a question, the passages
+needed to answer it, and a failure in the current workflow. Cross-section
+comparisons, qualified conclusions, and evidence lost in summaries are especially
+useful. [Open an issue](https://github.com/zhipuch/StrataWalk/issues).
+
+[Architecture](docs/architecture.md) · [Usage](docs/usage.md) · [Code and extension points](docs/development.md)
 
 ---
 
-**StrataWalk** · Hierarchical memory for long-document agents.
+**StrataWalk** · Long context. Navigable memory.
 
-Maintained by [@zhipuch](https://github.com/zhipuch) · [Architecture](docs/architecture.md) · [Feedback & ideas](https://github.com/zhipuch/StrataWalk/issues)
+Maintained by [@zhipuch](https://github.com/zhipuch)

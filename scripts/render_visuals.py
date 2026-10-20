@@ -24,8 +24,8 @@ def node(d,x,y,label,active=False,width=156):
  bb=d.textbbox((0,0),label,font=font(16,True)); text(d,(x-(bb[2]-bb[0])/2,y-9),label,16,TEAL if active else INK,True)
 # Static hero: one compact brand surface, with readable text and a miniature tree.
 im,d=base(); text(d,(65,58),'STRATAWALK',19,TEAL,True)
-text(d,(65,132),'Long documents.',62,INK,True); text(d,(65,207),'Navigable memory.',62,INK,True)
-text(d,(68,309),'Build a bottom-up tree index.',27,MUTED); text(d,(68,349),'Let agents search and walk it.',27,MUTED)
+text(d,(65,132),'Long context.',62,INK,True); text(d,(65,207),'Navigable memory.',62,INK,True)
+text(d,(68,309),'Build ordered memory once.',27,MUTED); text(d,(68,349),'Let the question guide the walk.',27,MUTED)
 pill(d,(65,449,276,488),'BUILD BOTTOM-UP'); pill(d,(290,449,505,488),'EXPLORE ANY SCALE',BLUE)
 positions=[(925,175),(815,310),(1035,310),(760,445),(870,445),(980,445),(1090,445)]
 for a,b in [(0,1),(0,2),(1,3),(1,4),(2,5),(2,6)]: d.line((*positions[a],*positions[b]),fill=LINE,width=3)
@@ -33,7 +33,7 @@ for i,(x,y) in enumerate(positions):
  d.ellipse((x-23,y-23,x+23,y+23),fill=PANEL,outline=TEAL if i in (0,1,4) else BLUE,width=3)
 for a,b in [(0,1),(1,4)]: d.line((*positions[a],*positions[b]),fill=TEAL,width=3)
 text(d,(65,622),'ORDERED SUMMARY TREES  /  MULTI-SCALE SEARCH  /  AGENTIC NAVIGATION',18,MUTED)
-text(d,(65,666),'DESIGN PREVIEW',14,TEAL,True)
+text(d,(65,666),'MARKDOWN / TXT TODAY  -  LONG-CONTEXT DESIGN',14,TEAL,True)
 im.save(OUT/'hero.png')
 
 # The index is a persistent structure. Tool actions live in a separate panel.
@@ -86,8 +86,8 @@ bframes[0].save(OUT/'index-build.gif',save_all=True,append_images=bframes[1:],du
 bframes[-1].save(OUT/'index-structure.png')
 walk=[
  ('01 / PLAN','Understand the question and select entry nodes.','The agent uses a compact chapter/ancestor map, embedding search, or both.',[],None,['AGENT WORKSPACE','User intent -> subquestions','Map and/or embedding search','Select m entry nodes','','Example entries: C1 and C2','The index stays unchanged.']),
- ('02 / READ','Read several starting nodes.','A semantic hit identifies a block and its containing node.',['C1','C2'],None,['READ ENTRY NODES','C1 contains [b1, b2, b3]','C2 contains [b1, b2, b3]','','Check whether information','is sufficient to answer.']),
- ('03 / UP','Move up when the information is too specific.','Follow parent links to read a broader abstraction.',['C1','R'],('C1','R'),['TOOL: move_up','C1 -> R','','Read the root blocks for','broader document context.','This is one optional move.']),
+ ('02 / INSPECT','Inspect several starting nodes.','Directory topics are already read; a search can load other entry nodes.',['C1','C2'],None,['INSPECT ENTRY NODES','C1 contains [b1, b2, b3]','C2 contains [b1, b2, b3]','','Directory nodes count as read.','Do not fetch their text again.','Identify missing evidence.']),
+ ('03 / UP','Move up when the information is too specific.','Follow a parent link; reuse the directory when the parent is already read.',['C1','R'],('C1','R'),['TOOL: move_up','C1 -> R','','Here R is already in the map.','Tool returns already_visited.','Reuse known overview topics.','Unread parents return text.']),
  ('04 / DOWN','Move down when more detail is needed.','Explore independent branches via their parent-child links.',['C1','C2','L2','L3'],('C1','L2'),['TOOL: move_down','C1 -> L2','C2 -> L3','','Branches may be explored','concurrently. Original chunks','provide detailed information.']),
  ('05 / COMPACT','Keep the active context within budget.','Compress the workspace while retaining findings and source references.',['L2','L3'],None,['TOOL: compact_context','Keep useful findings','Keep source/node references','Keep unresolved subquestions','','Re-enter search or navigation','when more information is needed.']),
  ('06 / FINISH','Answer when the information is sufficient.','The agent assembles an answer from the information it has gathered.',['L2','L3'],None,['TOOL: finish','User-facing answer','Relevant source references','','Navigation is adaptive.','Every query does not need','every tool shown here.'])]

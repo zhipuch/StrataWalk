@@ -5,9 +5,10 @@ import tempfile
 import unittest
 from stratawalk import BuildConfig, IndexBuilder, load_index, save_index
 from stratawalk.index.search import SemanticSearch
+from stratawalk.models import Section
 from stratawalk.parsing import MarkdownSectionParser
 from stratawalk.providers.offline import ExtractiveSummarizer, HashEmbedder
-from stratawalk.tokenization import ByteTokenizer, chunk_spans
+from stratawalk.tokenization import ByteTokenizer, chunk_spans, prefix
 
 TEXT = "# Report\n\n## Alpha\n" + "alpha apples evidence. " * 35 + "\n## Beta\n" + "beta oranges memory. " * 40
 
@@ -130,8 +131,53 @@ class IndexTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "output budget"):
             await instance.build(TEXT)
 
+    async def test_invalid_parser_fails_before_model_work(self):
+        class Parser:
+            def __init__(self, sections):
+                self.sections = sections
+            def parse(self, text):
+                return self.sections
+        class NoModelCalls:
+            async def summarize(self, *args):
+                raise AssertionError("Invalid parser must fail before model work")
+        cases = ([], [Section("s0", "partial", 0, len(TEXT) - 1)],
+                 [Section("s0", "gap", 1, len(TEXT))],
+                 [Section("s0", "first", 0, 1), Section("s0", "duplicate", 1, len(TEXT))])
+        for sections in cases:
+            with self.subTest(sections=sections):
+                instance = builder()
+                instance.parser, instance.summarizer = Parser(sections), NoModelCalls()
+                with self.assertRaisesRegex(ValueError, "Parser"):
+                    await instance.build(TEXT)
+
 
 class SourceTests(unittest.TestCase):
+    def test_chunking_counter_work_scales_with_input_not_remaining_suffixes(self):
+        class CountingTokenizer:
+            def __init__(self):
+                self.scanned = 0
+            def count(self, text):
+                self.scanned += len(text)
+                return len(text)
+        workloads = []
+        for length in (10000, 40000):
+            tokenizer = CountingTokenizer()
+            spans = chunk_spans("x" * length, 128, 0, tokenizer)
+            self.assertEqual(spans[-1][1], length)
+            self.assertTrue(all(end - start <= 128 for start, end in spans))
+            workloads.append(tokenizer.scanned)
+        self.assertLess(workloads[1], 5 * workloads[0])
+
+    def test_prefix_handles_unicode_and_tokenizers_with_compressed_text(self):
+        class Compressed:
+            def count(self, text):
+                return (len(text) + 7) // 8
+        self.assertEqual(prefix("x" * 100, 3, Compressed()), "x" * 24)
+        self.assertEqual(prefix("中🙂a", 7, ByteTokenizer()), "中🙂")
+        self.assertEqual(prefix("中", 2, ByteTokenizer()), "")
+        self.assertEqual(prefix("anything", 0, ByteTokenizer()), "")
+        self.assertEqual(prefix("", 10, ByteTokenizer()), "")
+
     def test_unicode_overlap_and_exact_offsets(self):
         text = "树索引与agent🙂" * 10
         spans = chunk_spans(text, 30, 8, ByteTokenizer())

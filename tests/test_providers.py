@@ -16,6 +16,17 @@ class FakeClient:
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
+    def test_endpoint_validation_uses_hostname_not_prefix(self):
+        for url in ("http://localhost.attacker.example/v1", "http://127.0.0.1.attacker.example/v1",
+                    "https:///v1", "https://user:secret@fixture.example/v1",
+                    "https://fixture.example/v1?api_key=secret", "https://fixture.example/v1#fragment"):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                CompatibleClient(url, "fixture")
+        for url in ("https://fixture.example/v1", "http://localhost:8000/v1",
+                    "http://127.0.0.1:8000/v1", "http://[::1]:8000/v1"):
+            with self.subTest(url=url):
+                self.assertEqual(CompatibleClient(url, "fixture").base_url, url)
+
     async def test_embedding_response_order_and_missing_indices(self):
         client = FakeClient({"data": [{"index": 1, "embedding": [0, 1]}, {"index": 0, "embedding": [1, 0]}]})
         embedder = CompatibleEmbedder(client, "fixture-embedding")

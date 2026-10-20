@@ -152,3 +152,13 @@ absent). It retains preambles and ignores fenced-code headings.
 `--heading-level` selects another depth. LlamaIndex uses its own Markdown header
 boundaries; parser choice is explicit. Plain UTF-8 TXT is treated as one section
 when no headings exist. This version does not parse PDF, scanned pages or images.
+
+The CLI preserves decoded source text including CRLF line endings. Citation
+positions are zero-based Python character offsets with an exclusive end, referring
+to the source snapshot stored in the index. Editing the file requires rebuilding;
+the existing index continues to refer to its original snapshot.
+
+Transcripts, notes, or traces may be supplied as a Markdown/TXT snapshot. Each
+index still has one source identity. Native turn metadata, multi-file references,
+and incremental updates require additional adapters and schema support. See
+[scope and assumptions](architecture.md#scope-and-assumptions).

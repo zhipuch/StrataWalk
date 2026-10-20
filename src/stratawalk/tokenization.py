@@ -31,23 +31,34 @@ class TiktokenTokenizer:
         return len(self.encoding.encode(text, disallowed_special=()))
 
 
-def prefix(text: str, budget: int, tokenizer: Tokenizer) -> str:
-    """Return a nonempty Unicode-safe prefix fitting a positive budget."""
+def _prefix_end(text: str, start: int, budget: int, tokenizer: Tokenizer) -> int:
+    """Find a fitting boundary using local probes, without scanning the suffix."""
     if budget <= 0:
-        return ""
-    if tokenizer.count(text) <= budget:
-        return text
-    lo, hi = 0, len(text)
+        return start
+    lo = start
+    width = max(1, budget)
+    hi = min(len(text), start + width)
+    while tokenizer.count(text[start:hi]) <= budget:
+        lo = hi
+        if hi == len(text):
+            return hi
+        width *= 2
+        hi = min(len(text), start + width)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if tokenizer.count(text[:mid]) <= budget:
+        if tokenizer.count(text[start:mid]) <= budget:
             lo = mid
         else:
             hi = mid - 1
     # Always verify the result, including tokenizers with boundary effects.
-    while lo and tokenizer.count(text[:lo]) > budget:
+    while lo > start and tokenizer.count(text[start:lo]) > budget:
         lo -= 1
-    return text[:lo]
+    return lo
+
+
+def prefix(text: str, budget: int, tokenizer: Tokenizer) -> str:
+    """Return a Unicode-safe prefix fitting the budget (possibly empty)."""
+    return text[:_prefix_end(text, 0, budget, tokenizer)]
 
 
 def chunk_spans(text: str, size: int, overlap: int, tokenizer: Tokenizer) -> List[Tuple[int, int]]:
@@ -56,10 +67,9 @@ def chunk_spans(text: str, size: int, overlap: int, tokenizer: Tokenizer) -> Lis
     spans = []
     start = 0
     while start < len(text):
-        piece = prefix(text[start:], size, tokenizer)
-        if not piece:
+        end = _prefix_end(text, start, size, tokenizer)
+        if end == start:
             raise ValueError("Chunk budget cannot fit one Unicode character")
-        end = start + len(piece)
         spans.append((start, end))
         if end == len(text):
             break

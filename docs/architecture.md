@@ -2,9 +2,9 @@
 
 # StrataWalk
 
-### Give long documents a hierarchy. Give agents a way to explore it.
+### Give long context a hierarchy. Give agents a way to explore it.
 
-Agentic long-document understanding through order-preserving summary trees,
+Long-context exploration through order-preserving summary trees,
 multi-scale semantic search, and evidence-grounded navigation.
 
 Build bottom-up · Search across scales · Navigate with intent · Answer with evidence
@@ -53,6 +53,33 @@ StrataWalk combines three mechanisms:
 The resulting tree acts as persistent document memory. A tool-driven agent
 maintains a smaller working context while exploring that memory.
 
+## Scope and Assumptions
+
+The method applies to long text that can be segmented into meaningful regions,
+organized in a useful order, and revisited through stable source references.
+Document chapters are the initial implementation of these regions. A transcript
+could use sessions or time ranges; a trace could use execution stages. The
+hierarchy is an access structure outside the model's native context window.
+
+The current `IndexBuilder.build(text, source_name)` creates one static text
+snapshot. A custom `SectionParser` may provide a different segmentation while
+preserving contiguous, complete character spans. Other text formats can be
+serialized by a caller, but serialization alone does not supply domain semantics.
+
+| Workload | Additional design needed |
+| --- | --- |
+| Conversation memory | Speaker/time/turn metadata, session boundaries, changed preferences, superseded facts |
+| Streaming or evolving sources | Stable identities across versions, append/update policy, ancestor and embedding invalidation |
+| Multiple sources | Per-source references, corpus routing, cross-source relationships |
+| Code or graph-shaped material | Syntax-aware regions, symbol/dependency links, exact analysis tools |
+| Exhaustive or lossless tasks | Direct source scans or deterministic computation rather than relying on summaries |
+
+Recursive summaries can omit details or distort qualifications. Source order
+provides a structural backbone, not a guarantee of semantic completeness.
+Search across branches can recover some cross-cutting evidence; a tree does
+not encode every relationship. The broader long-context applicability is a
+design hypothesis requiring workload-specific evaluation.
+
 ## Architecture
 
 ```mermaid
@@ -82,12 +109,15 @@ flowchart TB
 
 ### 1. Establish Source Structure
 
-Use document parsing and LlamaIndex-based processing to identify chapters or
-sections where reliable structure is available.
+The default standalone Markdown parser uses H2 sections when present, otherwise
+H1; plain text becomes one section. LlamaIndex Markdown parsing is optional.
+Custom parsers must preserve exact source spans. Empty, overlapping, incomplete,
+or out-of-order section lists fail before model work starts.
 
 Within each section, create overlapping source chunks that fit the configured
-embedding model's input budget. The chunk size is configurable; a value such
-as 1,024 tokens is an initial setting to evaluate, rather than a universal limit.
+embedding model's input budget. Defaults are 768 counter units per chunk,
+96 units of overlap, and a 1,024-unit embedding limit. The default counter uses
+UTF-8 bytes; a provider-specific tokenizer is needed for calibrated token budgets.
 
 When reliable chapter boundaries are unavailable, use a documented fallback
 segmentation policy.
@@ -97,7 +127,7 @@ Each source leaf retains:
 - Its original text.
 - Its document and section identifiers.
 - Its position in the original document.
-- Page references or character offsets, where available.
+- Exact character offsets; native page references require a future format adapter.
 - Its embedding and parent reference.
 
 Source text remains available throughout the hierarchy.
@@ -114,10 +144,7 @@ Repeat this process within chapters, then across adjacent chapter
 representations, until the document fits a configured root budget.
 
 ```text
-Document root
-├── Overview block
-├── Major themes
-│
+Document root [overview block, major-theme block, ...]
 ├── Chapters 1–2 summary
 │   ├── Chapter 1 summary
 │   │   ├── Passage-group summary
@@ -136,9 +163,10 @@ Document root
 Illustrative hierarchy; the number of levels depends on document length
 and configured budgets.
 
-Grouping follows document order. Summary blocks are stored in source order
-where their supporting regions permit it; cross-cutting themes retain
-explicit source references.
+Grouping follows source order regardless of model completion order. The summary
+prompt requests first-occurrence order for topics. Each output block records
+all immediate child blocks supplied to that reduction call. These references
+are input-group provenance, not model-verified alignment of individual claims.
 
 A long chapter may require several reduction rounds before producing its
 chapter-level representation.
@@ -177,14 +205,17 @@ one paragraph.
 
 At query time, provide the agent with:
 
-- The user's question and relevant conversation context.
-- A compact document map.
+- The user's question (conversation context must be supplied by the caller).
+- A chapter-to-root directory.
 - Navigation and search tools.
 - A bounded working context and an evidence ledger.
 
-The document map includes selected chapter descriptors and ancestor summaries,
-deduplicated and constrained by a token budget. Larger maps can be loaded
-progressively.
+By default, the system message contains every chapter and ancestor node with
+all topic text, deduplicated. These nodes already count as read. Full mode fails
+if that directory cannot fit the policy request. Explicit `directory_mode="budgeted"`
+with a positive `map_budget` includes higher abstractions first and reports
+omissions; navigation and search can load additional regions. A small root does
+not imply a small full directory: chapter contributions grow with chapter count.
 
 The agent then:
 
@@ -202,7 +233,7 @@ a chapter summary, an intermediate topic, or a source leaf.
 
 ## Agent Tools
 
-The following interfaces describe the proposed tool contract.
+These tools are implemented as model-selected JSON actions.
 The current JSON action interfaces are described in [development notes](development.md).
 
 | Tool | Purpose | Expected behavior |
@@ -210,11 +241,12 @@ The current JSON action interfaces are described in [development notes](developm
 | search | Find semantic entry points | Search source and summary blocks; return text, node IDs, block IDs, levels, scores, and source spans. |
 | move_up | Recover broader context | Load parent summaries and their structural metadata. |
 | move_down | Inspect supporting detail | List or load selected children, with pagination and token limits. |
-| compact_context | Maintain a bounded working context | Preserve verified findings, citations, unresolved questions, and the exploration frontier. |
-| finish | End the exploration | Return a supported answer, a partial answer, or an explicit statement of insufficient evidence. |
+| compact_context | Maintain a bounded working context | Retain bounded model-written notes and restore selected cached nodes; evidence references remain outside the active prompt. |
+| finish | End the exploration | Validate citation IDs and answer scope; return an answer or explicit insufficient status. |
 
-Navigation tools should accept batches of node IDs so independent branches
-can be explored efficiently.
+Navigation tools accept batches of node IDs. One coordinating agent can issue
+independent read actions concurrently, sharing a per-question visited set and
+cache. This is concurrent tool execution; separate reasoning agents are not spawned.
 
 search remains available throughout exploration, allowing the agent to
 recover from an unproductive branch or locate another relevant region.
@@ -228,25 +260,37 @@ memory.
 |---|---|
 | Document memory | Source text, summary blocks, embeddings, tree links, and provenance. |
 | Working memory | Current passages, subquestions, candidate branches, and recent tool results. |
-| Evidence ledger | Verified claims, supporting source references, conflicts, and open questions. |
+| Evidence ledger | Read source blocks with source spans and identities; a separate ledger retains read summary blocks. |
 
 Context compaction reduces the active workspace while retaining references
 needed to reload evidence.
 
-The runtime should reserve space for tool results and the final answer,
-and trigger compaction before the context window is exhausted.
+The runtime reserves output space and a safety margin, and fits complete recent
+observations and selected source evidence into each request. The policy chooses
+when to call compaction. Working notes are hypotheses, not verified facts.
+The directory is always part of the prompt; full mode never silently truncates it.
+The persistent tree, session cache, ledger, and trace remain in host memory;
+the model's working context is bounded, but host memory is not fixed-size.
 
 ### Stopping Conditions
 
-Exploration is bounded by configurable limits on tool calls, tokens,
-latency, and concurrent branches.
+Exploration is bounded by policy turns (`max_steps`), parallel actions, serialized
+prompt/tool-response budgets, and HTTP timeouts/retries. A global wall-clock or
+cost budget is not yet implemented. Coroutines cancelled during blocking HTTP
+I/O may leave an already-running worker request to finish.
 
 The agent should finish when the evidence adequately supports the answer,
 or when further exploration is unlikely to resolve a remaining gap within
 the available budget.
 
-Repeated visits and duplicate evidence should be tracked to avoid loops
-and inflated support from overlapping chunks.
+Session state deduplicates node reads and evidence by block ID; repeated action
+signatures are bounded. Overlapping leaves can still contain the same passage,
+so node deduplication does not establish independent evidence.
+
+`finish` checks that citation IDs were read or supplied in the directory.
+Source scope requires at least one source-leaf citation. Explicit overview scope
+may cite summaries alone. These checks do not establish entailment, completeness,
+or coverage of every claim in an answer; those require semantic evaluation.
 
 ## Design Principles
 
@@ -351,7 +395,7 @@ Ablations should test:
 - [x] Add persistent tree links and source-span lookup.
 - [x] Implement search and batched navigation tools.
 - [x] Add context compaction and an evidence ledger.
-- [x] Add citation-grounded answer generation.
+- [x] Add cited answers with reference and answer-scope checks.
 - [x] Add bounded concurrency and transient HTTP retries.
 - [x] Publish an offline end-to-end example.
 - [ ] Add caching and resumable indexing.

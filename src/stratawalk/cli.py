@@ -85,8 +85,10 @@ async def run(args):
             raise ValueError("This version accepts UTF-8 .md/.markdown/.txt; convert other formats first")
         config = BuildConfig(**{name: getattr(args, name) for name in BuildConfig.__dataclass_fields__})
         section_parser = LlamaIndexSectionParser() if args.parser == "llamaindex" else MarkdownSectionParser(args.heading_level)
+        with args.document.open(encoding="utf-8", newline="") as source:
+            text = source.read()
         index = await IndexBuilder(summarizer, embedder, config=config, parser=section_parser,
-                                   tokenizer=tokenizer).build(args.document.read_text(encoding="utf-8"), args.document.name)
+                                   tokenizer=tokenizer).build(text, args.document.name)
         save_index(index, args.output)
         print("Saved %s: %d nodes, %d blocks, depth %d" % (
             args.output, len(index.nodes), len(index.block_map()), index.nodes[index.root_id].level))

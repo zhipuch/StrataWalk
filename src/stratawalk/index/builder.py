@@ -2,7 +2,7 @@
 import asyncio
 from dataclasses import asdict, dataclass
 import hashlib
-from ..models import Block, Node, TreeIndex
+from ..models import Block, Node, Section, TreeIndex
 from ..parsing import MarkdownSectionParser
 from ..tokenization import ByteTokenizer, chunk_spans
 from ..providers.compatible import LLMSummarizer
@@ -57,7 +57,24 @@ class IndexBuilder:
         self.tokenizer = tokenizer or ByteTokenizer()
 
     async def build(self, text: str, source_name="document") -> TreeIndex:
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("Source must be nonempty text")
         sections = self.parser.parse(text)
+        # Validate adapters before allocating tasks or making model requests.
+        # An empty frontier cannot reduce; invalid spans would corrupt provenance.
+        if not isinstance(sections, list) or not sections:
+            raise ValueError("Parser must return a nonempty list of sections")
+        covered, section_ids = 0, set()
+        for section in sections:
+            if (not isinstance(section, Section) or not isinstance(section.id, str) or not section.id
+                    or section.id in section_ids or not isinstance(section.title, str)
+                    or any(not isinstance(v, int) or isinstance(v, bool) for v in (section.start, section.end))
+                    or section.start != covered or not section.start < section.end <= len(text)):
+                raise ValueError("Parser sections must have unique IDs and cover the source contiguously in order")
+            covered = section.end
+            section_ids.add(section.id)
+        if covered != len(text):
+            raise ValueError("Parser sections must cover the full source")
         nodes, tasks = {}, []
         gate = asyncio.Semaphore(self.config.concurrency)
         loop = asyncio.get_running_loop()

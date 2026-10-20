@@ -65,6 +65,11 @@ explicit even for a single-section document.
 - `context_limit` includes the complete serialized prompt, input block IDs/text,
   completion JSON reserve, corrective-feedback reserve and a safety margin.
 
+Source chunk boundaries use local, exponentially growing probes followed by
+binary refinement. Chunking does not repeatedly encode the entire remaining
+source suffix. Regression coverage checks counter work as input length grows,
+along with Unicode safety, overlap, and exact source coverage.
+
 The `ordered-topics-v2` prompt asks for core themes and claims, coherent standalone
 topics, overlap deduplication, source language/order, and preservation of material
 qualifications, negations and disagreements. LLM output is validated and can be
@@ -139,6 +144,12 @@ compaction, and shared visit deduplication.
 - Implement `SectionParser.parse(text)` for other input structures, preserving exact offsets.
 - Implement `policy.decide(state)` to change the agent decision mechanism.
 - Replace `SemanticSearch` for ANN/vector database scale without changing the tree model.
+
+Custom section parsers return a nonempty list of `Section` objects, with unique
+IDs and contiguous ordered spans covering the complete input. The builder checks
+this contract before scheduling model work. The current schema has one source
+identity and static character offsets; native multi-source and evolving memory
+require schema/versioning work in addition to a new parser.
 
 On Python 3.9, the optional extra selects LlamaIndex 0.10/0.11 to avoid
 newer transitive dependencies that use Python 3.10-only syntax. Python 3.10+

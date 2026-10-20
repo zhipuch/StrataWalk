@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stratawalk"
 version = "0.1.0"
-description = "Ordered summary trees and agent-directed navigation for long documents"
+description = "Hierarchical memory for long-context agents: ordered summary trees and evidence-directed navigation"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
