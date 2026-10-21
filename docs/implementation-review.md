@@ -1,5 +1,37 @@
 # Implementation and scope review
 
+## 2026-10-21: user workflow and exact search
+
+This pass follows a first-time user's path: understand the purpose, run a demo,
+configure models, reuse an index, read results, and recover from failed inputs.
+
+| Finding | Change |
+| --- | --- |
+| The first own-material example used a scripted offline policy for a comparison question | README separates the offline trial from model-driven questions and shows two queries reusing one index |
+| Users had to infer mode and answer scope from other fields | JSON results include `provider` and `answer_scope`; usage explains statuses, citation types and recovery steps |
+| Malformed index files raised uncaught data-shape errors | Loader reports the index name and a rebuild instruction; validation checks primitive types and walks iteratively |
+| Vector norm products overflowed/underflowed for valid finite values | Stable norm/scaling handles large and small values; malformed or zero query vectors fail explicitly |
+| Every query revalidated/renormalized all vectors and sorted all hits | Cache scalar statistics once, normalize the query once, select Top-k without a full sort, and skip embedding when no candidates remain |
+| Output/trace paths could replace an input file | Reject identical paths, symlink targets and hard-linked aliases |
+| Failed offline retrieval repeated until the turn budget expired | Return an explicit insufficient result after the unsuccessful attempt |
+| Embedding responses accepted Boolean/float indices or overflowed on oversized integers | Validate row types, integer indices and representable finite vector values |
+
+`scripts/benchmark_search.py` provides a reproducible local microbenchmark with
+4,000 synthetic blocks, 128 dimensions, seven queries, and Top-5 comparison.
+On this machine, a sample run reported 104.1 ms median for the exhaustive
+reference and 36.6 ms for the current query path, plus 81.0 ms one-time setup.
+The mean query time including setup over seven queries was 49.3 ms. Top-5 IDs
+and scores agreed with the exhaustive reference on that fixture.
+
+These timings exclude index loading, model/network calls and agent execution.
+They establish a local repeated-query improvement, with a setup cost that matters
+for one-off queries. Exact search still scans eligible vectors. Broad live-model
+quality, cost and latency claims remain unvalidated.
+
+Regression coverage includes corruption/type errors, extreme vectors, exact
+ranking and filters, deep trees, path collisions, result labels, and prompt/tool
+contracts. The optional LlamaIndex integration requires its extra to be installed.
+
 ## Long-context positioning
 
 StrataWalk's reusable method is an ordered hierarchy over source text, searchable
@@ -37,7 +69,7 @@ indexing speed. Network/model latency may dominate live runs.
 | P1 | Measure full-directory growth, tool workspace and host-memory use on long inputs | A bounded prompt and compact root do not guarantee bounded directory or host memory |
 | P2 | Incremental builds, stable versioned identities and resumable construction | Required for practical evolving conversation/trace memory and costly builds |
 | P2 | Source adapters and per-source metadata, followed by graph links where needed | Make broader context types useful without losing provenance |
-| P2 | ANN search, lighter persistence and cached vector norms when scale measurements justify them | Exact search scans all blocks; JSON and in-memory node caches are first-version choices |
+| P2 | ANN search and lighter persistence when scale measurements justify them | Norm caching is implemented; exact search still scans eligible blocks, and JSON/in-memory caches remain first-version choices |
 
 Evaluation should include distant evidence, conflicting statements, exact facts,
 irrelevant lexical matches, and deliberately unanswerable questions. For broader
@@ -47,8 +79,8 @@ tasks to establish fit and failure boundaries.
 ## Index construction and query contracts
 
 This review records the implementation changes made against the intended
-algorithm. Tests establish engineering behaviors; no real-model semantic
-accuracy or speed advantage is claimed.
+algorithm. Tests below establish engineering behaviors. Live-model semantic
+accuracy and end-to-end performance remain unmeasured.
 
 | Requirement | Earlier implementation | Current behavior |
 | --- | --- | --- |

@@ -1,4 +1,4 @@
-"""Small CLI: build an index, inspect it, search it, or run a tool-using agent."""
+"""Build reusable text memory, search at any scale, and answer with source references."""
 import argparse
 import asyncio
 from dataclasses import asdict
@@ -43,9 +43,10 @@ def parser():
             sub.add_argument("--parallel-actions", type=int, default=4)
             sub.add_argument("--tool-response-budget", type=int, default=4096)
             sub.add_argument("--trace", type=Path, help="Write tool trace (contains document excerpts)")
-            sub.add_argument("--json", action="store_true", help="Print answer, citations and status as JSON")
+            sub.add_argument("--json", action="store_true", help="Print answer, citations, status, answer scope and provider as JSON")
     for sub in (build, commands.choices["search"], commands.choices["ask"]):
-        sub.add_argument("--provider", choices=["offline", "compatible"], default="offline")
+        sub.add_argument("--provider", choices=["offline", "compatible"], default="offline",
+                         help="offline runs a deterministic demo; compatible uses your model endpoints")
         sub.add_argument("--base-url", default=os.environ.get("STRATAWALK_BASE_URL"))
         sub.add_argument("--chat-model", default=os.environ.get("STRATAWALK_CHAT_MODEL"))
         sub.add_argument("--embedding-model", default=os.environ.get("STRATAWALK_EMBEDDING_MODEL"))
@@ -68,6 +69,10 @@ def providers(args, tokenizer):
     return embedder, LLMSummarizer(model), ChatPolicy(model, getattr(args, "output_reserve", 2048))
 
 
+def _same_file(left, right):
+    return left.resolve() == right.resolve() or (left.exists() and right.exists() and left.samefile(right))
+
+
 async def run(args):
     if args.command == "inspect":
         index = load_index(args.index)
@@ -83,6 +88,8 @@ async def run(args):
     if args.command == "build":
         if args.document.suffix.lower() not in {".md", ".markdown", ".txt"}:
             raise ValueError("This version accepts UTF-8 .md/.markdown/.txt; convert other formats first")
+        if _same_file(args.document, args.output):
+            raise ValueError("Output index must differ from the source document; choose another --output path")
         config = BuildConfig(**{name: getattr(args, name) for name in BuildConfig.__dataclass_fields__})
         section_parser = LlamaIndexSectionParser() if args.parser == "llamaindex" else MarkdownSectionParser(args.heading_level)
         with args.document.open(encoding="utf-8", newline="") as source:
@@ -90,9 +97,12 @@ async def run(args):
         index = await IndexBuilder(summarizer, embedder, config=config, parser=section_parser,
                                    tokenizer=tokenizer).build(text, args.document.name)
         save_index(index, args.output)
-        print("Saved %s: %d nodes, %d blocks, depth %d" % (
-            args.output, len(index.nodes), len(index.block_map()), index.nodes[index.root_id].level))
+        print("Saved %s: %d nodes, %d blocks, depth %d (%s)" % (
+            args.output, len(index.nodes), len(index.block_map()), index.nodes[index.root_id].level,
+            "offline demo" if args.provider == "offline" else "model-built index"))
     else:
+        if args.command == "ask" and args.trace and _same_file(args.trace, args.index):
+            raise ValueError("Trace path must differ from the index; choose another --trace path")
         index = load_index(args.index)
         search = SemanticSearch(index, embedder)
         if args.command == "search":
@@ -108,11 +118,14 @@ async def run(args):
                 args.trace.parent.mkdir(parents=True, exist_ok=True)
                 args.trace.write_text(json.dumps(result.trace, ensure_ascii=False, indent=2), encoding="utf-8")
             if args.json:
-                print(json.dumps({"answer": result.answer, "citations": result.citations, "status": result.status},
+                print(json.dumps({"answer": result.answer, "citations": result.citations, "status": result.status,
+                                  "answer_scope": result.answer_scope, "provider": args.provider},
                                  ensure_ascii=False, indent=2))
             else:
                 print(result.answer)
                 print("\nStatus: " + result.status)
+                if result.answer_scope:
+                    print("Answer scope: " + result.answer_scope)
                 for citation in result.citations:
                     label = "source" if citation["evidence_type"] == "source" else "summary covering"
                     print("[%s] %s %s characters %d:%d" % (

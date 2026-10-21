@@ -35,6 +35,12 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await embedder.embed(["a", "b"])
 
+    async def test_malformed_embedding_rows_and_oversized_numbers_fail_clearly(self):
+        for row in (None, [], {"index": True, "embedding": [1]},
+                    {"index": 0.0, "embedding": [1]}, {"index": 0, "embedding": [10 ** 1000]}):
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                await CompatibleEmbedder(FakeClient({"data": [row]}), "fixture").embed(["text"])
+
     async def test_chat_and_summary_response_validation(self):
         client = FakeClient({"choices": [{"message": {"content": '{"blocks":["A summary.","Another theme."]}'}}]})
         model = CompatibleChat(client, "fixture-chat")

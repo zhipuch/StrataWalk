@@ -37,6 +37,9 @@ need network access for the setuptools build dependency.
 
 ## Real LLM and embedding endpoints
 
+From a cloned checkout, use `PYTHONPATH=src python3 -m stratawalk` in place of
+`stratawalk` below, or install the CLI with the editable-install commands above.
+
 The `compatible` adapter supports the text-based `/chat/completions` and
 `/embeddings` HTTP interfaces. Set a base URL that already includes the API
 version prefix. Models must support text chat and JSON-formatted responses
@@ -108,8 +111,31 @@ context. Transient HTTP 429 and selected 5xx responses have separate retries.
 For `ask`, `--context-limit` defaults to 24000 and `--output-reserve` to 2048.
 `--max-steps` bounds policy turns; each turn can issue up to `--parallel-actions`
 independent read actions (default 4). Source citations and summary citations are
-explicitly distinguished in JSON and CLI output. `--json` returns the answer,
-citations and status.
+explicitly distinguished in JSON and CLI output. `--json` returns `answer`,
+`citations`, `status`, `answer_scope`, and `provider`. The build confirmation also
+identifies an offline demo or model-built index.
+
+### Understanding answers
+
+| Field/value | Meaning |
+| --- | --- |
+| `status: complete` | The finish action passed reference and answer-scope checks. Factual correctness and complete claim support still need evaluation. |
+| `status: insufficient` | The policy reports that evidence is insufficient. Read the answer for the gap or suggested next step. |
+| `status: budget_exhausted` | No supported finish was produced within the policy-turn limit. |
+| `answer_scope: source` | A completed answer cites at least one read original source block. |
+| `answer_scope: overview` | The answer may cite only summary topics; source leaves need not have been read. |
+| `answer_scope: null` | Exploration ended without a finish action. |
+| `provider: offline` | A scripted demo returns source excerpts using lexical search. |
+| `provider: compatible` | Your configured models generate summaries and/or choose query actions. |
+
+Each citation carries the text, source name, character span, and an
+`evidence_type` of `source` or `summary`. For a source citation, `start:end`
+identifies the exact passage in the indexed snapshot. A summary citation's span
+identifies the region summarized; its text is generated abstraction.
+
+`--trace .stratawalk/walk.json` saves navigation actions and tool results for
+inspection. Choose a different path from the index. The CLI also rejects an
+index output path that would replace its source document.
 
 ### System directory and visit deduplication
 
@@ -139,6 +165,22 @@ also providing sufficient total context. Metadata counts toward this budget.
 
 CLI exit codes: 0 for success; 1 for invalid inputs/provider failure; 2 for
 insufficient evidence or an exhausted agent budget.
+
+## Troubleshooting
+
+| What you see | What to do |
+| --- | --- |
+| `stratawalk: command not found` | From the repository root, use `PYTHONPATH=src python3 -m stratawalk`, or install with `python -m pip install -e .`. |
+| Embedding provider/model differs from the index | Use the same `--provider`, base URL and embedding model as construction. Rebuild when switching from offline fixtures to real embeddings. |
+| Invalid index file | Restore a known-good copy or rebuild from the original source with `build`. Malformed schemas and field types produce an error with the index name. |
+| Full directory/question/notes exceed context | Increase `--context-limit` within your model's capacity, or explicitly add `--directory-mode budgeted --map-budget 3000` to the same ask command. |
+| A node exceeds the tool response budget | Increase `--tool-response-budget` and allow enough total context; smaller batches alone cannot fit an oversized node. Alternatively rebuild with smaller chunk/topic budgets. |
+| Offline demo could not retrieve excerpts | Try a descriptive question and check the index and tool budget. Offline mode stops with `insufficient` after an unsuccessful attempt. |
+| Query embedding has zero magnitude | For direct search, use meaningful words rather than punctuation; check a custom embedder if substantive text also produces zero vectors. |
+| Unsupported input format | Convert the material to UTF-8 Markdown/TXT first. Native PDF, OCR, image and code-aware adapters are not implemented. |
+
+Keep `--provider compatible` and your model settings on live commands when adding
+budget flags. Budget numbers use the selected counter: UTF-8 bytes by default.
 
 ## LlamaIndex section parsing
 

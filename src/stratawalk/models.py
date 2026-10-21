@@ -51,9 +51,43 @@ class TreeIndex:
 
     def validate(self) -> None:
         """Reject broken provenance, coverage, vectors, cycles and orphan nodes."""
-        if self.schema_version != 1:
+        if type(self.schema_version) is not int or self.schema_version != 1:
             raise ValueError("Unsupported index schema")
-        if not self.source_text or self.document_id != hashlib.sha256(self.source_text.encode()).hexdigest():
+
+        def identifier(value):
+            return isinstance(value, str) and bool(value)
+
+        def integer(value):
+            return isinstance(value, int) and not isinstance(value, bool)
+
+        def identifiers(values):
+            return isinstance(values, list) and all(identifier(value) for value in values)
+
+        if (not isinstance(self.source_text, str) or not self.source_text
+                or not identifier(self.document_id) or not identifier(self.source_name)
+                or not identifier(self.root_id) or not isinstance(self.nodes, dict)
+                or not isinstance(self.sections, list) or not isinstance(self.metadata, dict)):
+            raise ValueError("Invalid index header, source or collection types")
+        for section in self.sections:
+            if (not isinstance(section, Section) or not identifier(section.id)
+                    or not isinstance(section.title, str)
+                    or not integer(section.start) or not integer(section.end)):
+                raise ValueError("Invalid section field types")
+        # Validate primitives before using them as offsets, IDs or numeric data.
+        for node_id, node in self.nodes.items():
+            if (not identifier(node_id) or not isinstance(node, Node) or not identifier(node.id)
+                    or not isinstance(node.kind, str) or not integer(node.level) or node.level < 0
+                    or not integer(node.start) or not integer(node.end)
+                    or (node.section_id is not None and not identifier(node.section_id))
+                    or (node.parent is not None and not identifier(node.parent))
+                    or not identifiers(node.children) or not isinstance(node.blocks, list)):
+                raise ValueError("Invalid node field types")
+            for block in node.blocks:
+                if (not isinstance(block, Block) or not identifier(block.id)
+                        or not isinstance(block.text, str) or not identifiers(block.source_block_ids)
+                        or not isinstance(block.embedding, (list, tuple))):
+                    raise ValueError("Invalid block field types")
+        if self.document_id != hashlib.sha256(self.source_text.encode()).hexdigest():
             raise ValueError("Source checksum mismatch or empty source")
         if self.root_id not in self.nodes:
             raise ValueError("Missing root")
@@ -73,8 +107,9 @@ class TreeIndex:
         seen, block_ids, chapter_sections = set(), set(), set()
         dimension = None
 
-        def visit(node_id):
-            nonlocal dimension
+        pending = [self.root_id]
+        while pending:
+            node_id = pending.pop()
             if node_id in seen:
                 raise ValueError("Cycle or multiple structural parents")
             seen.add(node_id)
@@ -125,8 +160,13 @@ class TreeIndex:
                 if block.id in block_ids or not block.text:
                     raise ValueError("Duplicate block ID or empty block")
                 block_ids.add(block.id)
-                if not block.embedding or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
-                                                    and math.isfinite(v) for v in block.embedding):
+                try:
+                    finite = bool(block.embedding) and all(
+                        isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+                        for v in block.embedding)
+                except OverflowError:
+                    finite = False
+                if not finite:
                     raise ValueError("Missing or nonfinite embedding")
                 if dimension is None:
                     dimension = len(block.embedding)
@@ -134,10 +174,8 @@ class TreeIndex:
                     raise ValueError("Inconsistent embedding dimensions")
                 if node.kind != "leaf" and (not block.source_block_ids or not set(block.source_block_ids) <= allowed):
                     raise ValueError("Invalid summary provenance")
-            for child in children:
-                visit(child.id)
+            pending.extend(reversed(node.children))
 
-        visit(self.root_id)
         if chapter_sections != section_ids:
             raise ValueError("Missing chapter representation")
         if seen != set(self.nodes):

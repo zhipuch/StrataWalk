@@ -1,11 +1,14 @@
 import asyncio
 from copy import deepcopy
+from dataclasses import asdict
+import hashlib
+import json
 from pathlib import Path
 import tempfile
 import unittest
 from stratawalk import BuildConfig, IndexBuilder, load_index, save_index
 from stratawalk.index.search import SemanticSearch
-from stratawalk.models import Section
+from stratawalk.models import Block, Node, Section, TreeIndex
 from stratawalk.parsing import MarkdownSectionParser
 from stratawalk.providers.offline import ExtractiveSummarizer, HashEmbedder
 from stratawalk.tokenization import ByteTokenizer, chunk_spans, prefix
@@ -73,6 +76,46 @@ class IndexTests(unittest.IsolatedAsyncioTestCase):
         corrupt.nodes[corrupt.root_id].children[0] = "missing"
         with self.assertRaisesRegex(ValueError, "Missing child"):
             corrupt.validate()
+
+    async def test_wrong_field_types_in_saved_index_fail_clearly(self):
+        original = asdict(self.index)
+        node_id = self.index.root_id
+        corruptions = (
+            lambda data: data.update(schema_version=True),
+            lambda data: data.update(metadata=[]),
+            lambda data: data["sections"][0].update(id=[]),
+            lambda data: data["nodes"][node_id].update(level=True),
+            lambda data: data["nodes"][node_id].update(start=0.0),
+            lambda data: data["nodes"][node_id].update(parent=[]),
+            lambda data: data["nodes"][node_id].update(children="bad"),
+            lambda data: data["nodes"][node_id]["blocks"][0].update(text=["bad"]),
+            lambda data: data["nodes"][node_id]["blocks"][0].update(source_block_ids=[[]]),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "corrupt.json"
+            for number, mutate in enumerate(corruptions):
+                data = deepcopy(original)
+                mutate(data)
+                path.write_text(json.dumps(data))
+                with self.subTest(case=number), self.assertRaisesRegex(ValueError, "Invalid index file"):
+                    load_index(path)
+
+    async def test_deep_valid_tree_does_not_depend_on_python_recursion_limit(self):
+        source, nodes, previous = "x", {}, None
+        for level in range(1500):
+            node_id = "n%06d" % level
+            kind = "leaf" if level == 0 else "chapter" if level == 1 else "summary"
+            node = Node(node_id, kind, level, 0, 1, "s0",
+                        [Block(node_id + ":b0", source, [1.0],
+                               [previous.blocks[0].id] if previous else [])],
+                        [previous.id] if previous else [])
+            if previous:
+                previous.parent = node_id
+            nodes[node_id], previous = node, node
+        previous.kind, previous.section_id = "root", None
+        index = TreeIndex(hashlib.sha256(source.encode()).hexdigest(), "deep.txt", source,
+                          previous.id, nodes, [Section("s0", "Document", 0, 1)])
+        index.validate()
 
     async def test_multiscale_search_and_provider_mismatch(self):
         search = SemanticSearch(self.index, HashEmbedder())

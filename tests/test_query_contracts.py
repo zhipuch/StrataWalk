@@ -49,6 +49,7 @@ class QueryContractTests(unittest.IsolatedAsyncioTestCase):
             "citation_ids": [block_id], "answer_scope": "overview"}}])
         result = await Agent(self.tools, policy).run("Give an overview")
         self.assertEqual(result.status, "complete")
+        self.assertEqual(result.answer_scope, "overview")
         self.assertEqual([t["tool"] for t in result.trace], ["finish"])
         self.assertEqual(result.citations[0]["evidence_type"], "summary")
 

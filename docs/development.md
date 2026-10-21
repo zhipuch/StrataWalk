@@ -138,6 +138,35 @@ compaction, and shared visit deduplication.
 
 ## Extension points
 
+### Exact search
+
+`SemanticSearch` validates vectors and caches scalar norm/scale statistics once
+for an index snapshot. Each query is normalized once; bounded Top-k selection
+avoids sorting and materializing every block hit. Distinct-node mode first picks
+the best block per node. Empty filtered candidate sets skip the embedding call.
+Zero-vector blocks are not semantic hits; zero-vector queries fail explicitly.
+Scaling handles extremely large/small finite vectors without overflowing a
+product of squared norms.
+
+The cache adds scalar metadata per block and retains the existing vectors.
+Treat the indexed embeddings as immutable while using a search engine; construct
+a new `SemanticSearch` after replacing or mutating them. Setup has a one-time
+cost, so repeated queries benefit most. This remains an exact linear scan over
+eligible vectors; ANN-scale retrieval is future work.
+
+Run the deterministic local search microbenchmark with:
+
+```bash
+PYTHONPATH=src python3 scripts/benchmark_search.py
+```
+
+It compares exhaustive sorting against the current search path on synthetic
+vectors, checks Top-k identity, and reports setup plus repeated-query timing.
+It includes no model/network I/O and does not measure semantic quality or
+end-to-end agent latency.
+
+### Provider and parser adapters
+
 - Implement `Embedder.embed(texts)` with a stable `name` for another embedding backend.
 - Implement `summarize(blocks, budget)` for a different summarizer.
 - Implement `ChatModel.complete(messages, max_tokens=...)` for a different model API.

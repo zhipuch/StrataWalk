@@ -3,7 +3,7 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 import json
 import re
-from typing import List
+from typing import List, Optional
 from .prompts import policy_messages
 from ..providers.compatible import parse_json
 from ..tokenization import ByteTokenizer, prefix
@@ -40,6 +40,7 @@ class AgentResult:
     citations: List[dict]
     status: str
     trace: List[dict] = field(default_factory=list)
+    answer_scope: Optional[str] = None
 
 
 class ChatPolicy:
@@ -125,7 +126,7 @@ class Agent:
                     raise ValueError("Source-scope answers need a read source leaf; use overview scope for directory-only synthesis")
             trace.append({"step": step, "tool": "finish", "args": args})
             return AgentResult(answer, [{"block_id": i, **known[i]} for i in ids],
-                               "insufficient" if insufficient else "complete", trace)
+                               "insufficient" if insufficient else "complete", trace, scope)
 
         async def execute(action, step):
             tool, args = action["tool"], action["args"]

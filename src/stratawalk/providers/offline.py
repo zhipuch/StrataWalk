@@ -54,6 +54,11 @@ class OfflinePolicy:
     """
     async def decide(self, state):
         if not state["evidence"]:
+            if state["observations"]:
+                return {"tool": "finish", "args": {
+                    "answer": "Offline demo could not retrieve source excerpts. Try a more descriptive question, "
+                              "check the tool budget, or use --provider compatible for model-directed retrieval.",
+                    "insufficient": True}}
             return {"tool": "search", "args": {"query": state["question"], "top_k": 3, "kind": "leaf"}}
         snippets, ids = [], []
         for block_id, record in state["evidence"].items():

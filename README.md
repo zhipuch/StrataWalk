@@ -26,6 +26,15 @@ Long documents are the first implementation. The underlying design targets
 **long-context exploration** wherever material can be segmented, organized,
 and linked back to stable source evidence.
 
+Build an index once, reuse it across questions, and inspect the passages behind
+an answer. StrataWalk is designed for questions that change reading scale:
+
+| Your question | The reading path |
+| :--- | :--- |
+| “What is the main argument, and what qualifies it?” | Overview → major themes → supporting passages. |
+| “Where do these sections disagree?” | Compare original evidence across separate branches. |
+| “Where is this figure justified?” | Find the passage and inspect its surrounding context. |
+
 ## The StrataWalk Design
 
 | Mechanism | What it gives the agent |
@@ -41,6 +50,8 @@ support precise claims.
 
 ## Quick Start
 
+### Try the offline example
+
 Python 3.9+, no API key or third-party runtime dependencies:
 
 ```bash
@@ -49,22 +60,41 @@ cd StrataWalk
 PYTHONPATH=src python3 examples/offline_demo.py
 ```
 
-The example builds `.stratawalk/example.json`, retrieves source excerpts,
-and prints character-offset citations and a `search → finish` trace.
-Extractive summaries, hashed lexical vectors, and a scripted policy make this
-an offline plumbing demonstration. Real models choose their own tool actions.
+The example builds `.stratawalk/example.json`, retrieves excerpts from the
+included report, and prints source citations plus `Trace: ['search', 'finish']`.
+It runs a scripted search with extractive summaries and lexical vectors, so you
+can try indexing and inspect evidence without an account.
 
-Try your own UTF-8 Markdown/TXT file:
+### Ask questions with your models
+
+Follow [model setup](docs/usage.md#real-llm-and-embedding-endpoints) to configure
+your chat and embedding endpoints. Then run this included report—or replace
+`examples/report.md` with your own UTF-8 Markdown/TXT file:
 
 ```bash
-PYTHONPATH=src python3 -m stratawalk build notes.md --output .stratawalk/notes.json
-PYTHONPATH=src python3 -m stratawalk inspect .stratawalk/notes.json
-PYTHONPATH=src python3 -m stratawalk ask .stratawalk/notes.json 'Which findings disagree?' --json
+PYTHONPATH=src python3 -m stratawalk build examples/report.md \
+  --provider compatible --output .stratawalk/report.json
+PYTHONPATH=src python3 -m stratawalk ask .stratawalk/report.json \
+  'What improved quality and at what cost?' --provider compatible \
+  --json --trace .stratawalk/walk.json
+PYTHONPATH=src python3 -m stratawalk ask .stratawalk/report.json \
+  'Which limitations qualify the conclusion?' --provider compatible
 ```
 
-These commands default to the offline fixtures. For LLM summaries and an
-LLM-directed walk, configure chat and embedding endpoints and pass
-`--provider compatible` to both `build` and `ask`: [model setup and usage](docs/usage.md).
+The same index serves both questions. `--provider compatible` enables LLM
+summaries and model-selected navigation; use the same embedding provider/model
+for building and querying. [All commands and budgets](docs/usage.md).
+
+### Read the result
+
+`ask --json` returns the answer, cited text and source offsets, `status`,
+`answer_scope`, and `provider`. A completed `source` answer includes read source evidence;
+an `overview` may use summary topics. `insufficient` reports an evidence gap;
+`budget_exhausted` means exploration stopped before a supported finish. The trace
+records search/navigation actions so you can inspect how the agent reached its answer.
+
+Reference and scope checks establish which evidence was read. Answer correctness,
+complete claim support, and retrieval quality still require live-model evaluation.
 
 ## Long Context, Beyond Documents
 
@@ -136,16 +166,10 @@ cached restoration lets evidence return to the prompt without another traversal.
 | `compact_context` | Retain working notes and restore selected cached nodes. |
 | `finish` | Return a cited answer or state the remaining evidence gap. |
 
-The system directory includes all section-to-root topics by default. Those nodes
-already count as read. An overview may cite these summaries directly; precise
-answers require at least one read source-leaf citation. Result records distinguish
-`source` from `summary` evidence. Citation validation checks references and scope;
-semantic support still requires evaluation.
-
-A full directory can grow beyond the model context. Full mode fails explicitly;
-`--directory-mode budgeted --map-budget …` opts into a partial map. Tool results
-and policy requests are budgeted as serialized messages. The default counter
-uses UTF-8 bytes; calibrated model-token accounting needs a suitable tokenizer.
+Section-to-root topics are available in the system directory by default and
+count as already read. The agent follows missing details down to source passages.
+For large inputs, use a larger model context or explicitly choose a partial map;
+[budget settings and troubleshooting](docs/usage.md#troubleshooting) explain how.
 
 <sub>The animations are mechanism illustrations, not execution recordings or benchmark results. Node IDs and paths are illustrative; actions are optional.</sub>
 
@@ -158,7 +182,7 @@ uses UTF-8 bytes; calibrated model-token accounting needs a suitable tokenizer.
 | Markdown/TXT parsing, exact source spans, ordered recursive topic summaries | PDF/OCR, native conversation/code/corpus adapters |
 | All-level embeddings, exact cosine search, atomic JSON persistence | ANN search, incremental updates, checkpoint/resume |
 | Batched navigation, shared visit state, bounded prompts, evidence ledger and traces | Live-model summary fidelity, answer quality, and retrieval efficiency |
-| Offline end-to-end example and local regression tests | Reproducible benchmarks and a real model execution recording |
+| Offline end-to-end example, regression tests and a local search microbenchmark | Reproducible live-model benchmarks and a real model execution recording |
 
 The HTTP adapter supports compatible text chat and embedding endpoints, with
 bounded transient retries and corrective summary regeneration. Compatibility

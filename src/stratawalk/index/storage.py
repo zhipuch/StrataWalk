@@ -26,12 +26,19 @@ def save_index(index: TreeIndex, path) -> None:
 
 
 def load_index(path) -> TreeIndex:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if data.get("schema_version") != 1:
-        raise ValueError("Unsupported index schema")
-    data["nodes"] = {key: Node(**{**node, "blocks": [Block(**b) for b in node["blocks"]]})
-                     for key, node in data["nodes"].items()}
-    data["sections"] = [Section(**section) for section in data["sections"]]
-    index = TreeIndex(**data)
-    index.validate()
-    return index
+    path = Path(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Expected a JSON object")
+        if type(data.get("schema_version")) is not int or data["schema_version"] != 1:
+            raise ValueError("Unsupported index schema")
+        data["nodes"] = {key: Node(**{**node, "blocks": [Block(**b) for b in node["blocks"]]})
+                         for key, node in data["nodes"].items()}
+        data["sections"] = [Section(**section) for section in data["sections"]]
+        index = TreeIndex(**data)
+        index.validate()
+        return index
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError, OverflowError) as exc:
+        raise ValueError("Invalid index file '%s': %s. Rebuild it from the source with stratawalk build."
+                         % (path.name, exc)) from None

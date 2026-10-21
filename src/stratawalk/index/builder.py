@@ -59,6 +59,8 @@ class IndexBuilder:
     async def build(self, text: str, source_name="document") -> TreeIndex:
         if not isinstance(text, str) or not text.strip():
             raise ValueError("Source must be nonempty text")
+        if not isinstance(source_name, str) or not source_name.strip():
+            raise ValueError("source_name must be a nonempty string")
         sections = self.parser.parse(text)
         # Validate adapters before allocating tasks or making model requests.
         # An empty frontier cannot reduce; invalid spans would corrupt provenance.

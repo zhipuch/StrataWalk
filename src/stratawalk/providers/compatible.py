@@ -60,16 +60,19 @@ class CompatibleEmbedder:
         data = await self.client.post("/embeddings", {"model": self.model, "input": texts})
         if not isinstance(data, dict) or not isinstance(data.get("data"), list):
             raise ValueError("Invalid embedding response schema")
-        try:
-            rows = sorted(data["data"], key=lambda row: row["index"])
-        except (KeyError, TypeError):
-            raise ValueError("Embedding rows require integer indices") from None
+        if any(not isinstance(row, dict) or type(row.get("index")) is not int for row in data["data"]):
+            raise ValueError("Embedding rows require integer indices")
+        rows = sorted(data["data"], key=lambda row: row["index"])
         if [r["index"] for r in rows] != list(range(len(texts))):
             raise ValueError("Embedding endpoint returned missing/duplicate indices")
         vectors = [row.get("embedding") for row in rows]
-        if any(not isinstance(v, list) or not v or not all(
+        try:
+            invalid = any(not isinstance(v, list) or not v or not all(
                 isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in v)
-               for v in vectors):
+                for v in vectors)
+        except OverflowError:
+            invalid = True
+        if invalid:
             raise ValueError("Embedding vectors must contain finite numbers")
         if vectors and any(len(v) != len(vectors[0]) for v in vectors):
             raise ValueError("Embedding response dimensions differ")

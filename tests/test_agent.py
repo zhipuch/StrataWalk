@@ -30,6 +30,12 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(citation["text"], TEXT[citation["start"]:citation["end"]])
         self.assertEqual([t["tool"] for t in result.trace], ["search", "finish"])
 
+    async def test_offline_failed_retrieval_stops_without_repeating(self):
+        result = await Agent(self.tools, OfflinePolicy()).run("!!!")
+        self.assertEqual(result.status, "insufficient")
+        self.assertEqual(result.citations, [])
+        self.assertEqual([event["tool"] for event in result.trace], ["error", "finish"])
+
     async def test_up_down_pagination_and_compaction(self):
         root = self.index.root_id
         leaf = next(n for n in self.index.nodes.values() if n.kind == "leaf")
