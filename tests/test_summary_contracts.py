@@ -17,6 +17,23 @@ class Responses:
 
 
 class SummaryContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_actual_corrective_request_is_checked_with_compressed_feedback(self):
+        class RepeatedTokenCounter:
+            name = "repeated-token-fixture"
+            def count(self, text):
+                return len(text.encode()) - 159 * text.count("x" * 160)
+        tokenizer, blocks, budget, margin = RepeatedTokenCounter(), [Block("b0", "Source statement.")], 100, 32
+        planned = LLMSummarizer.messages(blocks, budget, 6, None, tokenizer.name, "x" * 160)
+        reserve = LLMSummarizer.completion_limit(budget)
+        limit = tokenizer.count(json.dumps(planned, ensure_ascii=False)) + 32 + reserve + margin
+        model = Responses(['{"blocks":[1]}', '{"blocks":["Valid."]}'])
+        with self.assertRaisesRegex(ValueError, "corrective summary request exceeds context budget"):
+            await LLMSummarizer(model).summarize(blocks, budget, tokenizer=tokenizer,
+                                               context_limit=limit, safety_margin=margin)
+        self.assertEqual(len(model.messages), 1)
+        for messages, max_tokens in model.messages:
+            self.assertLessEqual(tokenizer.count(json.dumps(messages, ensure_ascii=False)) + 32 + max_tokens + margin, limit)
+
     async def test_overlong_output_is_corrected_not_truncated(self):
         model = Responses([json.dumps({"blocks": ["x" * 101]}), json.dumps({"blocks": ["Core idea."]})])
         result = await LLMSummarizer(model).summarize([Block("b0", "original")], 100, topic_size=50, max_topics=2)

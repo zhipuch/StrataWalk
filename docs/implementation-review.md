@@ -1,5 +1,27 @@
 # Implementation and scope review
 
+## 2026-10-25: promotion readiness and budget boundaries
+
+The project is suitable for an early technical preview, with implementation
+claims separated from unmeasured semantic quality and end-to-end performance.
+See [the launch review and draft announcement](launch-readiness.md).
+
+Two reproduced boundary failures were fixed:
+
+- Corrective summary feedback can consume more counter units than repetitive
+  planning filler. Each actual request is now checked before model dispatch,
+  including retries; a compressed-counter regression verifies that an over-budget
+  second request is never sent.
+- Compaction previously demanded new-read workspace before it could clear notes.
+  Read budgeting now applies to navigation and cache restoration, with restoration
+  using the proposed notes. A tight-context regression clears 1,200 units of notes
+  successfully while keeping every rendered policy request within its budget.
+
+The shared response-budget helper keeps these rules in one place. No broad
+runtime rewrite was needed. Local regression results are 65 passing tests and
+one skipped optional LlamaIndex integration; remote CI status and live-model
+quality have not been established by this review.
+
 ## 2026-10-21: user workflow and exact search
 
 This pass follows a first-time user's path: understand the purpose, run a demo,

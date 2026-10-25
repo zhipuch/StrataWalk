@@ -76,6 +76,9 @@ qualifications, negations and disagreements. LLM output is validated and can be
 regenerated with bounded corrective feedback (`summary_retries`, default 2).
 Malformed or overlong output is never silently truncated into a valid summary.
 This enforces structure and budgets; semantic fidelity still needs real-model evaluation.
+Each actual summary request, including corrective retries, is checked against
+the context budget before dispatch. Planning feedback is only an estimate:
+repeated placeholder text can tokenize more cheaply than a real error message.
 
 Construction is a dependency DAG, not a loop with whole-level barriers.
 Contiguous groups are planned using source order and reserved output caps.
@@ -124,6 +127,8 @@ rankings and page metadata. A single node that cannot fit raises an actionable
 error; reducing batching alone cannot solve an oversized individual node.
 Pagination changes child ranges, not whether an already read child is reread.
 Context compaction rehydrates cached nodes without retraversing the index.
+Clearing notes requires no new node-read workspace. Restoring cached nodes is
+budgeted against the proposed notes, and the complete next request must still fit.
 
 The source-evidence ledger persists outside the active prompt. Each request
 renders a bounded selection of recent observations and evidence. Notes are

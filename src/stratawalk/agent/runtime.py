@@ -86,6 +86,16 @@ class Agent:
                     "remaining_steps": self.config.max_steps - step,
                     "max_parallel_actions": self.config.max_parallel_actions}
 
+        def set_response_budget(step, action_count=1, proposed_notes=None):
+            state = base_state(step)
+            if proposed_notes is not None:
+                state["notes"] = proposed_notes
+            free = max_input - count_state(state)
+            per_action = min(self.tools.response_budget, free // (3 * action_count))
+            if per_action < 512:
+                raise ValueError("Directory leaves insufficient tool workspace; use a larger context or explicit budgeted directory")
+            tools.response_budget = per_action
+
         def state_for(step):
             state = base_state(step)
             if count_state(state) > max_input:
@@ -166,26 +176,26 @@ class Agent:
                 tool, args = actions[0]["tool"], actions[0]["args"]
                 if tool == "finish":
                     return finish(args, step)
-                # Budget the total batch, reserving room for JSON framing and
-                # observations. Each record is whole, never silently truncated.
-                free = max_input - count_state(base_state(step))
-                per_action = min(self.tools.response_budget, free // (3 * len(actions)))
-                if per_action < 512:
-                    raise ValueError("Directory leaves insufficient tool workspace; use a larger context or explicit budgeted directory")
-                tools.response_budget = per_action
                 if tool == "compact_context":
                     if set(args) - {"notes", "keep_node_ids"}:
                         raise ValueError("Unknown compact_context arguments")
                     new_notes, keep = args.get("notes", ""), args.get("keep_node_ids", [])
                     if not isinstance(new_notes, str) or not isinstance(keep, list) or len(keep) > 10 or any(not isinstance(i, str) or i not in tools.session.cache for i in keep):
                         raise ValueError("Compaction restores only previously read cached nodes")
+                    proposed_notes = prefix(new_notes, self.config.notes_budget, self.tokenizer)
+                    # Clearing notes needs no new node-read workspace. Cached
+                    # restoration is budgeted against the proposed state.
+                    if keep:
+                        set_response_budget(step, proposed_notes=proposed_notes)
                     result = tools.read(keep, from_cache=True)
-                    notes = prefix(new_notes, self.config.notes_budget, self.tokenizer)
+                    notes = proposed_notes
                     observations.clear()
                     result["notes"] = notes
                     result["preserved_source_ids"] = list(evidence)[-50:]
                     events = [{"step": step, "tool": tool, "args": args, "result": result}]
                 else:
+                    # Reserve room for JSON framing and the complete read batch.
+                    set_response_budget(step, len(actions))
                     # Shared session makes read/visit commits atomic between
                     # awaits. Parallel branches cannot return a node twice.
                     events = await asyncio.gather(*(execute(a, step) for a in actions))

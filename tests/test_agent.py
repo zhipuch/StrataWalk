@@ -79,6 +79,28 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertLessEqual(ByteTokenizer().count(json.dumps(messages, ensure_ascii=False)) + 32,
                                  config.context_limit - config.output_reserve - config.safety_margin)
 
+    async def test_compaction_can_clear_notes_when_new_reads_cannot_fit(self):
+        config = AgentConfig()
+        directory = self.tools.document_map()
+        session = self.tools.new_session(directory)
+        state = {"question": "question", "document_map": directory, "notes": "", "observations": [],
+                 "evidence": {}, "navigation": session.navigation_state(),
+                 "remaining_steps": config.max_steps, "max_parallel_actions": config.max_parallel_actions}
+        base_units = ByteTokenizer().count(json.dumps(policy_messages(state), ensure_ascii=False)) + 32
+        config.context_limit = base_units + config.output_reserve + config.safety_margin + 2600
+        policy = Scripted([
+            {"tool": "compact_context", "args": {"notes": "x" * config.notes_budget}},
+            {"tool": "compact_context", "args": {"notes": ""}},
+            {"tool": "finish", "args": {"answer": "Insufficient.", "insufficient": True}},
+        ])
+        result = await Agent(self.tools, policy, config=config).run("question")
+        self.assertEqual([event["tool"] for event in result.trace], ["compact_context", "compact_context", "finish"])
+        self.assertEqual(policy.states[1]["notes"], "x" * config.notes_budget)
+        self.assertEqual(policy.states[2]["notes"], "")
+        for item in policy.states:
+            used = ByteTokenizer().count(json.dumps(policy_messages(item), ensure_ascii=False)) + 32
+            self.assertLessEqual(used + config.output_reserve + config.safety_margin, config.context_limit)
+
     async def test_unknown_nodes_and_bad_pagination(self):
         with self.assertRaises(ValueError):
             self.tools.move_down(["unknown"])

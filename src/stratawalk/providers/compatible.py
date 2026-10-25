@@ -157,11 +157,17 @@ class LLMSummarizer:
              attempts=3, context_limit=16384, safety_margin=512):
         from ..tokenization import ByteTokenizer
         tokenizer = tokenizer or ByteTokenizer()
-        # Reserve the largest bounded corrective feedback before any request.
+        # Estimate corrective-feedback room for planning. Repeated filler can
+        # tokenize cheaply, so every actual retry is checked separately below.
         messages = self.messages(blocks, budget, max_topics, topic_size,
                                  getattr(tokenizer, "name", "counter units"), "x" * 160)
+        return self._fits_request(messages, self.completion_limit(budget, max_topics),
+                                  tokenizer, context_limit, safety_margin)
+
+    @staticmethod
+    def _fits_request(messages, reserve, tokenizer, context_limit, safety_margin):
         used = tokenizer.count(json.dumps(messages, ensure_ascii=False)) + 32
-        return used + self.completion_limit(budget, max_topics) + safety_margin <= context_limit
+        return used + reserve + safety_margin <= context_limit
 
     async def summarize(self, blocks, budget, *, max_topics=6, topic_size=None,
                         tokenizer=None, attempts=3, context_limit=16384, safety_margin=512):
@@ -174,11 +180,14 @@ class LLMSummarizer:
                          tokenizer=tokenizer, context_limit=context_limit, safety_margin=safety_margin):
             raise ValueError("Serialized summary request exceeds context budget")
         correction = ""
+        reserve = self.completion_limit(budget, max_topics)
         for attempt in range(attempts):
             messages = self.messages(blocks, budget, max_topics, topic_size,
                                      getattr(tokenizer, "name", "counter units"), correction)
+            if not self._fits_request(messages, reserve, tokenizer, context_limit, safety_margin):
+                raise ValueError("Serialized corrective summary request exceeds context budget; increase context_limit or reduce summary size")
             try:
-                raw = await self.model.complete(messages, max_tokens=self.completion_limit(budget, max_topics))
+                raw = await self.model.complete(messages, max_tokens=reserve)
                 result = parse_json(raw)
                 paragraphs = result.get("blocks")
                 if set(result) != {"blocks"} or not isinstance(paragraphs, list) or not paragraphs or not all(
