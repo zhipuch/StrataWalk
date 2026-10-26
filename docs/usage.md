@@ -8,19 +8,29 @@ Python 3.9+ is required. Commands below run from the repository root.
 PYTHONPATH=src python3 examples/offline_demo.py
 ```
 
-The example builds `.stratawalk/example.json`, retrieves source passages and
-prints their source references. It uses extractive summaries, stable hashed
-word vectors, and a scripted search → finish policy. It verifies plumbing;
+The example builds `.stratawalk/example.json`, shows a source-ordered tree,
+retrieves source passages, and prints their references, status and next command.
+Its small fixture uses chunks large enough to display complete source sections.
+It uses extractive summaries, stable hashed word vectors, and a scripted
+search → finish policy. It verifies plumbing;
 it does not establish semantic retrieval quality or autonomous reasoning.
 
 Or use the CLI directly:
 
 ```bash
 PYTHONPATH=src python3 -m stratawalk build examples/report.md --output .stratawalk/report.json
-PYTHONPATH=src python3 -m stratawalk inspect .stratawalk/report.json
+PYTHONPATH=src python3 -m stratawalk inspect .stratawalk/report.json --tree
 PYTHONPATH=src python3 -m stratawalk search .stratawalk/report.json 'reranking memory' --kind leaf
 PYTHONPATH=src python3 -m stratawalk ask .stratawalk/report.json 'What improved quality and at what cost?' --trace .stratawalk/walk.json
 ```
+
+`inspect --tree` shows section names, intermediate summaries, source previews,
+node IDs and source character spans. It defaults to at most 40 nodes and reports
+omissions; use `--max-nodes 80` for a larger view. Previews are shortened only for
+display; stored text and citation offsets stay intact. `inspect` without `--tree`
+continues to return JSON statistics and metadata.
+Interactive terminals show a short building/exploring status on stderr before
+model work starts. JSON and other stdout output remain separate from this status.
 
 For a standard editable install:
 

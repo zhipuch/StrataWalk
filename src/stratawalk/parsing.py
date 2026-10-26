@@ -31,12 +31,14 @@ class MarkdownSectionParser:
         headings = []
         offset, fence = 0, None
         for line in text.splitlines(keepends=True):
-            marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+            marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line.rstrip("\r\n"))
             if marker:
                 run = marker.group(1)
-                if fence is None:
+                tail = marker.group(2)
+                if fence is None and (run[0] != "`" or "`" not in tail):
                     fence = run
-                elif run[0] == fence[0] and len(run) >= len(fence):
+                elif (fence is not None and run[0] == fence[0] and len(run) >= len(fence)
+                      and not tail.strip(" \t")):
                     fence = None
             elif fence is None:
                 match = re.match(r"^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$", line)

@@ -60,10 +60,14 @@ class OfflinePolicy:
                               "check the tool budget, or use --provider compatible for model-directed retrieval.",
                     "insufficient": True}}
             return {"tool": "search", "args": {"query": state["question"], "top_k": 3, "kind": "leaf"}}
-        snippets, ids = [], []
-        for block_id, record in state["evidence"].items():
-            ids.append(block_id)
-            snippets.append("[%s] %s" % (block_id, record["text"]))
+        # The bounded workspace prioritizes recent records, which can reverse
+        # a search batch. Present excerpts in retrieval rank order instead.
+        ranked = [match["block_id"] for observation in reversed(state["observations"])
+                  for action in observation.get("actions", []) if action.get("tool") == "search"
+                  for match in action.get("result", {}).get("matches", [])
+                  if match["block_id"] in state["evidence"]]
+        ids = list(dict.fromkeys(ranked + list(state["evidence"])))
+        snippets = ["[%s] %s" % (block_id, state["evidence"][block_id]["text"]) for block_id in ids]
         return {"tool": "finish", "args": {
             "answer": "Offline demo: retrieved source excerpts (not a synthesized LLM answer).\n\n" + "\n\n".join(snippets),
             "citation_ids": ids}}

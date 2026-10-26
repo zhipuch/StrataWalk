@@ -10,6 +10,7 @@ src/stratawalk/
 ├── models.py              # Node, Block, Section, TreeIndex; structural validation
 ├── tokenization.py        # Explicit budget units and exact source chunk spans
 ├── parsing.py             # Markdown chapters and optional LlamaIndex adapter
+├── presentation.py        # Bounded, source-ordered terminal tree view
 ├── providers/
 │   ├── base.py            # Small async model protocols
 │   ├── offline.py         # Clearly labeled deterministic development fixtures
@@ -137,7 +138,9 @@ reach the next policy request. Citation validation checks known block IDs,
 source offsets and answer scope; it cannot prove textual entailment.
 
 The offline policy deliberately performs only search → finish and reports exact
-excerpts. It is not evidence of autonomous reasoning quality. Scripted/model-adapter
+excerpts in retrieval rank order. The workspace may prioritize recent evidence,
+so the policy uses tool match metadata to retain the original ranking in its output.
+It is not evidence of autonomous reasoning quality. Scripted/model-adapter
 fixtures exercise navigation, parallel branches, directory-only overview answers,
 compaction, and shared visit deduplication.
 

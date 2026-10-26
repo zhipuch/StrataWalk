@@ -1,5 +1,6 @@
-"""Regenerate README artwork. Requires Pillow; no model/API calls."""
+"""Regenerate README artwork. Requires Pillow and Arial/DejaVu Sans; no API calls."""
 from pathlib import Path
+from functools import lru_cache
 import math
 from PIL import Image, ImageDraw, ImageFont
 ROOT=Path(__file__).resolve().parents[1]
@@ -8,12 +9,23 @@ W,H=1200,720
 BG='#0a1020'; PANEL='#111c30'; INK='#eaf1ff'; MUTED='#94a8c7'; TEAL='#55e3c0'; BLUE='#75aaff'; LINE='#293d5b'
 FONT='/System/Library/Fonts/Supplemental/Arial.ttf'
 BOLD='/System/Library/Fonts/Supplemental/Arial Bold.ttf'
-def font(n,b=False): return ImageFont.truetype(BOLD if b else FONT,n)
+@lru_cache(maxsize=None)
+def font(n, b=False):
+ candidates = (BOLD if b else FONT,
+               '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf' if b else
+               '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+               'DejaVuSans-Bold.ttf' if b else 'DejaVuSans.ttf')
+ for candidate in candidates:
+  try:
+   return ImageFont.truetype(candidate, n)
+  except OSError:
+   continue
+ raise RuntimeError('Install Arial or DejaVu Sans to regenerate the README visuals.')
 def text(d,xy,s,n=20,c=INK,b=False): d.text(xy,s,font=font(n,b),fill=c)
-def base():
- im=Image.new('RGB',(W,H),BG); d=ImageDraw.Draw(im)
- for x in range(0,W,40): d.line((x,0,x,H),fill='#101a2b')
- for y in range(0,H,40): d.line((0,y,W,y),fill='#101a2b')
+def base(height=H):
+ im=Image.new('RGB',(W,height),BG); d=ImageDraw.Draw(im)
+ for x in range(0,W,40): d.line((x,0,x,height),fill='#101a2b')
+ for y in range(0,height,40): d.line((0,y,W,y),fill='#101a2b')
  return im,d
 def pill(d,box,s,c=TEAL):
  d.rounded_rectangle(box, radius=14,fill=PANEL,outline=c,width=1)
@@ -23,17 +35,17 @@ def node(d,x,y,label,active=False,width=156):
  d.rounded_rectangle((x-width/2,y-23,x+width/2,y+23),radius=10,fill='#143b3c' if active else PANEL,outline=TEAL if active else LINE,width=2)
  bb=d.textbbox((0,0),label,font=font(16,True)); text(d,(x-(bb[2]-bb[0])/2,y-9),label,16,TEAL if active else INK,True)
 # Static hero: one compact brand surface, with readable text and a miniature tree.
-im,d=base(); text(d,(65,58),'STRATAWALK',19,TEAL,True)
-text(d,(65,132),'Long context.',62,INK,True); text(d,(65,207),'Navigable memory.',62,INK,True)
-text(d,(68,309),'Build ordered memory once.',27,MUTED); text(d,(68,349),'Let the question guide the walk.',27,MUTED)
-pill(d,(65,449,276,488),'BUILD BOTTOM-UP'); pill(d,(290,449,505,488),'EXPLORE ANY SCALE',BLUE)
-positions=[(925,175),(815,310),(1035,310),(760,445),(870,445),(980,445),(1090,445)]
+im,d=base(420); text(d,(60,30),'STRATAWALK',18,TEAL,True)
+text(d,(58,80),'Long context.',54,INK,True); text(d,(58,143),'Navigable memory.',54,INK,True)
+text(d,(61,226),'Build once. Search at any scale.',25,MUTED)
+text(d,(61,260),'Walk back to the source.',25,MUTED)
+text(d,(61,344),'OVERVIEW   /   TOPICS   /   SOURCE',18,TEAL,True)
+positions=[(930,75),(820,190),(1040,190),(765,305),(875,305),(985,305),(1095,305)]
 for a,b in [(0,1),(0,2),(1,3),(1,4),(2,5),(2,6)]: d.line((*positions[a],*positions[b]),fill=LINE,width=3)
 for i,(x,y) in enumerate(positions):
- d.ellipse((x-23,y-23,x+23,y+23),fill=PANEL,outline=TEAL if i in (0,1,4) else BLUE,width=3)
+ d.ellipse((x-20,y-20,x+20,y+20),fill=PANEL,outline=TEAL if i in (0,1,4) else BLUE,width=3)
 for a,b in [(0,1),(1,4)]: d.line((*positions[a],*positions[b]),fill=TEAL,width=3)
-text(d,(65,622),'ORDERED SUMMARY TREES  /  MULTI-SCALE SEARCH  /  AGENTIC NAVIGATION',18,MUTED)
-text(d,(65,666),'MARKDOWN / TXT TODAY  -  LONG-CONTEXT DESIGN',14,TEAL,True)
+text(d,(60,393),'ORDERED MEMORY  /  SEMANTIC ENTRY  /  EVIDENCE-DIRECTED NAVIGATION',14,MUTED)
 im.save(OUT/'hero.png')
 
 # The index is a persistent structure. Tool actions live in a separate panel.

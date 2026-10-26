@@ -29,6 +29,9 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         for citation in result.citations:
             self.assertEqual(citation["text"], TEXT[citation["start"]:citation["end"]])
         self.assertEqual([t["tool"] for t in result.trace], ["search", "finish"])
+        returned = {node["node_id"] for node in result.trace[0]["result"]["nodes"]}
+        expected = [hit["block_id"] for hit in result.trace[0]["result"]["matches"] if hit["node_id"] in returned]
+        self.assertEqual([citation["block_id"] for citation in result.citations], expected)
 
     async def test_offline_failed_retrieval_stops_without_repeating(self):
         result = await Agent(self.tools, OfflinePolicy()).run("!!!")

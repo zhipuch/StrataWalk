@@ -10,6 +10,7 @@ from . import BuildConfig, IndexBuilder, load_index, save_index
 from .agent import Agent, AgentConfig, ChatPolicy, TreeTools
 from .index.search import SemanticSearch
 from .parsing import LlamaIndexSectionParser, MarkdownSectionParser
+from .presentation import format_index_tree
 from .providers.compatible import CompatibleChat, CompatibleClient, CompatibleEmbedder, LLMSummarizer
 from .providers.offline import ExtractiveSummarizer, HashEmbedder, OfflinePolicy
 from .tokenization import ByteTokenizer, TiktokenTokenizer
@@ -27,6 +28,8 @@ def parser():
         build.add_argument("--" + name.replace("_", "-"), type=int, default=field.default)
     inspect = commands.add_parser("inspect", help="Print index structure/statistics")
     inspect.add_argument("index", type=Path)
+    inspect.add_argument("--tree", action="store_true", help="Show a readable source-ordered tree instead of JSON")
+    inspect.add_argument("--max-nodes", type=int, default=40, help="Maximum nodes in --tree output (default: 40)")
     for command in ("search", "ask"):
         sub = commands.add_parser(command, help="Search blocks" if command == "search" else "Run the agent")
         sub.add_argument("index", type=Path)
@@ -73,14 +76,23 @@ def _same_file(left, right):
     return left.resolve() == right.resolve() or (left.exists() and right.exists() and left.samefile(right))
 
 
+def _progress(message):
+    if sys.stderr.isatty():
+        print(message, file=sys.stderr, flush=True)
+
+
 async def run(args):
     if args.command == "inspect":
         index = load_index(args.index)
+        if args.tree:
+            print(format_index_tree(index, args.max_nodes))
+            return 0
+        blocks = index.block_map()
         print(json.dumps({"document_id": index.document_id, "source": index.source_name,
                           "root_id": index.root_id, "sections": [asdict(s) for s in index.sections],
-                          "nodes": len(index.nodes), "blocks": len(index.block_map()),
+                          "nodes": len(index.nodes), "blocks": len(blocks),
                           "depth": index.nodes[index.root_id].level,
-                          "embedding_dimensions": len(next(iter(index.block_map().values())).embedding),
+                          "embedding_dimensions": len(next(iter(blocks.values())).embedding),
                           "metadata": index.metadata}, ensure_ascii=False, indent=2))
         return 0
     tokenizer = TiktokenTokenizer(args.encoding) if args.encoding else ByteTokenizer()
@@ -94,8 +106,9 @@ async def run(args):
         section_parser = LlamaIndexSectionParser() if args.parser == "llamaindex" else MarkdownSectionParser(args.heading_level)
         with args.document.open(encoding="utf-8", newline="") as source:
             text = source.read()
-        index = await IndexBuilder(summarizer, embedder, config=config, parser=section_parser,
-                                   tokenizer=tokenizer).build(text, args.document.name)
+        builder = IndexBuilder(summarizer, embedder, config=config, parser=section_parser, tokenizer=tokenizer)
+        _progress("Building indexed memory…")
+        index = await builder.build(text, args.document.name)
         save_index(index, args.output)
         print("Saved %s: %d nodes, %d blocks, depth %d (%s)" % (
             args.output, len(index.nodes), len(index.block_map()), index.nodes[index.root_id].level,
@@ -110,10 +123,12 @@ async def run(args):
             print(json.dumps([asdict(hit) for hit in hits], ensure_ascii=False, indent=2))
         else:
             tools = TreeTools(index, search, tokenizer=tokenizer, response_budget=args.tool_response_budget)
-            result = await Agent(tools, policy, tokenizer=tokenizer, config=AgentConfig(
+            agent = Agent(tools, policy, tokenizer=tokenizer, config=AgentConfig(
                 max_steps=args.max_steps, context_limit=args.context_limit,
                 output_reserve=args.output_reserve, directory_mode=args.directory_mode,
-                map_budget=args.map_budget, max_parallel_actions=args.parallel_actions)).run(args.question)
+                map_budget=args.map_budget, max_parallel_actions=args.parallel_actions))
+            _progress("Exploring the indexed text…")
+            result = await agent.run(args.question)
             if args.trace:
                 args.trace.parent.mkdir(parents=True, exist_ok=True)
                 args.trace.write_text(json.dumps(result.trace, ensure_ascii=False, indent=2), encoding="utf-8")

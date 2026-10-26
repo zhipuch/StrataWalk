@@ -237,6 +237,19 @@ class SourceTests(unittest.TestCase):
         self.assertEqual([s.title for s in sections], ["Preamble", "First", "Second"])
         self.assertEqual("".join(text[s.start:s.end] for s in sections), text)
 
+    def test_fence_with_trailing_text_does_not_end_a_code_block(self):
+        for fence in ("```", "~~~~"):
+            text = ("# Report\r\n## Real\r\n" + fence + "python\r\nx = 1\r\n" + fence
+                    + " still code\r\n## Not a chapter\r\n" + fence + " \t\r\n## After\r\nBody\r\n")
+            with self.subTest(fence=fence):
+                sections = MarkdownSectionParser().parse(text)
+                self.assertEqual([s.title for s in sections], ["Preamble", "Real", "After"])
+                self.assertEqual("".join(text[s.start:s.end] for s in sections), text)
+
+    def test_backticks_in_info_text_do_not_open_a_fence(self):
+        text = "# Report\n```inline `code`\n## Visible\nBody\n"
+        self.assertEqual([s.title for s in MarkdownSectionParser().parse(text)], ["Preamble", "Visible"])
+
     def test_invalid_reduction_budget(self):
         with self.assertRaises(ValueError):
             BuildConfig(reduction_input=100).validate()

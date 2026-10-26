@@ -1,5 +1,35 @@
 # Implementation and scope review
 
+## 2026-10-26: first-run experience, visuals and parsing
+
+The current user surfaces are the README, its diagrams, and the CLI. The README
+now reaches Quick Start before design tables and includes an actual offline
+output excerpt. The hero is shorter (1200×420), and the offline example shows a
+real persisted tree, complete fixture sections, citations, status and a next step.
+Interactive CLI runs report their initial building/exploring phase on stderr;
+stdout stays compatible with JSON consumers.
+
+`inspect --tree` adds bounded, source-ordered terminal inspection while preserving
+the existing default JSON output. Source previews are display-only and escape
+terminal control characters. The renderer uses an iterative traversal and limits
+queued children to the remaining display budget.
+
+Two correctness issues were reproduced and fixed:
+
+- The active evidence dictionary prioritizes recent records, reversing insertion
+  order within a retrieval batch. The scripted offline policy now uses tool match
+  metadata to present returned excerpts in retrieval rank order.
+- A fence followed by non-whitespace text incorrectly closed a code block, causing
+  a following code heading to become a source section. Closing fences now require
+  whitespace-only tails; backtick-containing info text does not open a fence.
+  These boundaries follow [CommonMark](https://spec.commonmark.org/0.31.2/#fenced-code-blocks).
+
+Regression coverage includes bounded tree output, JSON compatibility, source
+order, unchanged source text, terminal escaping, retrieval order, and fenced code
+with CRLF. The local suite has 69 passing tests and one skipped optional integration.
+Visual changes improve presentation; user conversion and live-model quality
+remain unmeasured. See [the updated launch review](launch-readiness.md).
+
 ## 2026-10-25: promotion readiness and budget boundaries
 
 The project is suitable for an early technical preview, with implementation

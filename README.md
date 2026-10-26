@@ -26,27 +26,7 @@ Long documents are the first implementation. The underlying design targets
 **long-context exploration** wherever material can be segmented, organized,
 and linked back to stable source evidence.
 
-Build an index once, reuse it across questions, and inspect the passages behind
-an answer. StrataWalk is designed for questions that change reading scale:
-
-| Your question | The reading path |
-| :--- | :--- |
-| “What is the main argument, and what qualifies it?” | Overview → major themes → supporting passages. |
-| “Where do these sections disagree?” | Compare original evidence across separate branches. |
-| “Where is this figure justified?” | Find the passage and inspect its surrounding context. |
-
-## The StrataWalk Design
-
-| Mechanism | What it gives the agent |
-| :--- | :--- |
-| **Source order as the backbone** | Adjacent passages reduce into adjacent higher-level regions, retaining the progression of an argument or sequence. |
-| **Search at every scale** | Source chunks and individual summary topics have embeddings. A question can enter at a detail, a theme, or an overview. |
-| **A walk that changes direction** | Move up for context, down for supporting detail, or search for another branch. Entry points and actions depend on the question. |
-| **Persistent memory, bounded working context** | Keep the index outside the prompt. Load whole nodes as needed; compact working notes and restore cached evidence. |
-
-**The distinctive combination is ordered abstraction + semantic entry + explicit
-navigation + context management.** Summaries orient the walk; original passages
-support precise claims.
+Built for developers creating agents that need both local evidence and a broader view.
 
 ## Quick Start
 
@@ -60,10 +40,27 @@ cd StrataWalk
 PYTHONPATH=src python3 examples/offline_demo.py
 ```
 
-The example builds `.stratawalk/example.json`, retrieves excerpts from the
-included report, and prints source citations plus `Trace: ['search', 'finish']`.
-It runs a scripted search with extractive summaries and lexical vectors, so you
-can try indexing and inspect evidence without an account.
+The example shows the actual index tree, retrieves complete source sections from
+the included report, and prints citations, status, and a tool trace. Output excerpt:
+
+```text
+StrataWalk · "report.md"
+4 sections · 9 nodes · 9 blocks
+Overview [n000008 · 1 topic]
+…
+Trace: ['search', 'finish']
+Status: complete · offline source excerpts
+```
+
+The saved index is reusable. Inspect it with:
+
+```bash
+PYTHONPATH=src python3 -m stratawalk inspect .stratawalk/example.json --tree
+```
+
+Tree output defaults to 40 nodes; `--max-nodes 80` shows more. This offline trial
+uses a scripted policy, extractive summaries and lexical vectors. Real models
+choose their own search and navigation actions after you configure endpoints.
 
 ### Ask questions with your models
 
@@ -95,6 +92,30 @@ records search/navigation actions so you can inspect how the agent reached its a
 
 Reference and scope checks establish which evidence was read. Answer correctness,
 complete claim support, and retrieval quality still require live-model evaluation.
+
+## The StrataWalk Design
+
+| Mechanism | What it gives the agent |
+| :--- | :--- |
+| **Source order as the backbone** | Adjacent passages reduce into adjacent higher-level regions, retaining the progression of an argument or sequence. |
+| **Search at every scale** | Source chunks and individual summary topics have embeddings. A question can enter at a detail, a theme, or an overview. |
+| **A walk that changes direction** | Move up for context, down for supporting detail, or search for another branch. Entry points and actions depend on the question. |
+| **Persistent memory, bounded working context** | Keep the index outside the prompt. Load whole nodes as needed; compact working notes and restore cached evidence. |
+
+**The distinctive combination is ordered abstraction + semantic entry + explicit
+navigation + context management.** Summaries orient the walk; original passages
+support precise claims.
+
+### Questions it is designed for
+
+Build an index once, reuse it across questions, and inspect the passages behind
+an answer. StrataWalk is designed for questions that change reading scale:
+
+| Your question | The reading path |
+| :--- | :--- |
+| “What is the main argument, and what qualifies it?” | Overview → major themes → supporting passages. |
+| “Where do these sections disagree?” | Compare original evidence across separate branches. |
+| “Where is this figure justified?” | Find the passage and inspect its surrounding context. |
 
 ## Long Context, Beyond Documents
 

@@ -11,6 +11,27 @@ from stratawalk.cli import main
 
 
 class CLITests(unittest.TestCase):
+    def test_tree_view_is_bounded_and_json_inspection_still_works(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / "report.md", Path(directory) / "report.json"
+            source.write_text("# Report\n\n## First\nEvidence.\n## Second\nMore evidence.")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["build", str(source), "--output", str(target)]), 0)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(main(["inspect", str(target), "--tree", "--max-nodes", "2"]), 0)
+            tree = stdout.getvalue()
+            self.assertIn("Overview", tree)
+            self.assertIn("nodes omitted", tree)
+            self.assertEqual(tree.count(" topic]"), 2)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(main(["inspect", str(target)]), 0)
+            stats = json.loads(stdout.getvalue())
+            self.assertEqual(stats["source"], "report.md")
+            self.assertEqual(stats["sections"][1]["title"], "First")
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["inspect", str(target), "--tree", "--max-nodes", "0"]), 1)
     def test_invalid_index_files_return_actionable_error_without_traceback(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "broken.json"
